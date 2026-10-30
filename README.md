@@ -1,5 +1,9 @@
 # Keylight
 
+[![Support Keylight on Ko-fi](https://img.shields.io/badge/Support%20Keylight-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/scizers)
+
+**Mac** · **Windows (beta)** · iOS & Android coming soon · [Download](https://github.com/scizerss/keylight-piano/releases/latest)
+
 An open-source piano-learning app for the 24-key light-up keyboards ROLI made (Piano M
 and LUMI Keys), for people whose keyboard lost its app when ROLI Learn was discontinued.
 Falling notes in 3D over a keyboard that looks like yours, the real keys lighting up
@@ -17,16 +21,21 @@ over plain MIDI (see [Install on Windows](#install-on-windows)).
 
 ## What it does
 
+- **Drop in any MP3 and learn it.** Keylight turns the song into notes you can
+  practise, picks up its cover art and lyrics, and scrolls time-synced lyrics while
+  you play. The notes are worked out on your own computer and the file is never
+  uploaded; cover and lyrics come from the file's tags, or from a quick online lookup
+  (iTunes Search, LRCLIB) that you can switch off. MIDI and MusicXML work too.
 - Four note views: a 3D cascade, Rainbow, Colornote and Classic
-- The keyboard's own keys light up the next note, in four light styles you switch
-  with the keyboard's mode button
+- The keyboard's own keys light up the next note; on a Mac, in four light styles you
+  switch with the keyboard's mode button
 - Wait mode (the song waits for you on every note), 0.5x / 0.75x / full speed, loop
   a section, left, right or both hands, count-in, metronome, note names or finger
   numbers
 - 19 songs, 5 lessons (Watch, Practise, Play), Scales & Chords, a Playground with 19
   scales and live chord names, 4 arcade games, stars, streaks and achievements
-- Import your own MIDI, MusicXML or an audio file, which it turns into notes on your computer
-- 8 instruments, sustain pedal, pitch bend and pressure
+- Play with feeling: 8 instruments and the sustain pedal; on sustained sounds such as
+  strings, press into a key to swell it and wiggle it for vibrato
 - A hand-tracking beta: a camera over the keys shows which finger is over which key
 
 | Song library | Playground |
@@ -470,6 +479,22 @@ LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bu
 
 - The app never downloads music. Songs are public-domain MusicXML; import your own
   `.mid` / MusicXML files from Search.
+
+## Roadmap
+
+- **Windows (beta)**: works today with basic key lights in the keyboard's own colours.
+  The four light styles, brightness, the arrow and mode buttons and the battery level
+  need blocksd, which does not run on Windows yet. Feedback from Windows owners is
+  very welcome.
+- **iOS and Android**: coming soon.
+- **Hand tracking**: from the beta (which finger is over which key) to feedback on
+  your fingering.
+
+## Support
+
+Keylight is free. If it helps you learn, you can support it on
+[Ko-fi](https://ko-fi.com/scizers), or with the Sponsor button at the top of the
+repository.
 
 ## Contributing
 

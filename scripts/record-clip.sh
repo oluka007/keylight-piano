@@ -7,7 +7,8 @@
 # query sets a mode), records <seconds> of it with its own take recorder (rec=<seconds>,
 # renderer/recorder.js) and quits. The take becomes <out.mp4>: constant 60 fps H.264
 # (crf 16, yuv420p, +faststart) with AAC 256k audio, and its JSON sidecar is written
-# next to it as <out>.json. Seconds default to 12. The query must open a song (demo=...).
+# next to it as <out>.json. Seconds default to 12. The query must open a song (demo=...)
+# or the Playground (freeplay=<root>; add fpdemo=1 for a scripted chord progression).
 # LUMI_SHOT_DELAY (ms, default 2500) waits after the page loads before the song starts;
 # KEEP_TAKE=1 keeps the raw take and the profile; ELECTRON_APP picks the Electron bundle.
 # LUMI_SCALE=2 draws the stage at twice the pixels (2560 wide), as on a Retina screen;
@@ -25,7 +26,7 @@ OUT=${2:a}
 DURATION=${3:-12}
 DELAY=${LUMI_SHOT_DELAY:-2500}
 SIDECAR="${OUT:r}.json"
-[[ "$QUERY" == *demo=* ]] || { echo "error: the query must open a song with demo=<song> (for example 'demo=twinkle&pos=0')" >&2; exit 2; }
+[[ "$QUERY" == (*\&|)(demo|freeplay)=* ]] || { echo "error: the query must open a song with demo=<song> (for example 'demo=twinkle&pos=0') or the Playground with freeplay=<root>" >&2; exit 2; }
 [[ $DURATION == <-> || $DURATION == <->.<-> ]] && (( DURATION > 0 )) || { echo "error: seconds must be a positive number" >&2; exit 2; }
 FFMPEG=$(command -v ffmpeg || print -r -- /opt/homebrew/bin/ffmpeg)
 FFPROBE=$(command -v ffprobe || print -r -- /opt/homebrew/bin/ffprobe)
@@ -48,7 +49,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # The app plays the song (Watch) unless the query picks a mode; the take starts with it
-[[ "$QUERY" == *mode=* ]] || QUERY="$QUERY&mode=WATCH"
+[[ "$QUERY" == *mode=* || "$QUERY" != *demo=* ]] || QUERY="$QUERY&mode=WATCH"
 [[ "$QUERY" == *autoplay=* ]] || QUERY="$QUERY&autoplay=$DELAY"
 [[ "$QUERY" == *rec=* ]] || QUERY="$QUERY&rec=$DURATION"
 echo "Recording ${DURATION}s of '$QUERY' with sound (starts ${DELAY} ms after load)"

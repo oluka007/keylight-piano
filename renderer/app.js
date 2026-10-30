@@ -177,6 +177,10 @@ function boot() {
       if (q.get('mode')) setMode(q.get('mode'))
       if (q.get('view')) { settings.view = q.get('view'); player.setView(settings.view); syncHudButtons() }
       if (q.get('labels')) { settings.labels = q.get('labels'); player.setNoteLabels(settings.labels); syncHudButtons() }
+      // hands=left|right|both: the hand to practise, as the Hands button sets it (not saved)
+      if (['left', 'right', 'both'].includes(q.get('hands'))) { settings.hands = q.get('hands'); player.setHandFilter(settings.hands); syncHudButtons() }
+      // speed=0.5|0.75|1 plays slower, as the speed track does (a demo clip's half-speed run)
+      if (['0.5', '0.75', '1'].includes(q.get('speed'))) setSpeed(q.get('speed'))
       // autoplay=1 (or a delay in ms) starts playback: used by scripts/record.sh.
       // rec=<seconds> also records that much of it as a take, whatever the setting
       // (scripts/record-clip.sh)
@@ -185,13 +189,24 @@ function boot() {
         if (!player || player.active) return
         if (recSecs > 0 && beginTake('rec query')) setTimeout(() => endTake('rec ' + recSecs + ' s'), recSecs * 1000)
         togglePlay()
+        startDemoScripts(q)
       }, Math.max(400, Number(q.get('autoplay')) || 0))
       if (q.get('res')) {
         showResults({ overallAccuracy: 0.86, noteAccuracy: 0.86, rhythmAccuracy: 0.76, totalNotes: 42, totalNotesHit: 36, perfect: 24, good: 8, early: 2, late: 2, missed: 6, longestStreak: 11, starRating: 4 })
       }
     })
   }
-  if (q.get('freeplay') !== null && q.get('freeplay') !== undefined && q.has('freeplay')) startFreeplay(Number(q.get('freeplay') || 0))
+  if (q.get('freeplay') !== null && q.get('freeplay') !== undefined && q.has('freeplay')) {
+    startFreeplay(Number(q.get('freeplay') || 0))
+    // rec=<seconds> records the Playground too (scripts/record-clip.sh), starting autoplay
+    // ms after load; fpdemo=1 plays a chord progression in it, so the take has the chord names
+    const recSecs = Number(q.get('rec')) || 0
+    if (recSecs > 0 || q.get('fpdemo')) setTimeout(() => {
+      if (!freeplay) return
+      if (recSecs > 0 && beginTake('rec query')) setTimeout(() => endTake('rec ' + recSecs + ' s'), recSecs * 1000)
+      if (q.get('fpdemo')) playFreeplayDemo()
+    }, Math.max(400, Number(q.get('autoplay')) || 0))
+  }
   if (q.get('style')) setLightStyle(q.get('style'), false)
   if (q.get('chip')) searchChip = q.get('chip')
   if (q.get('screen')) showScreen(q.get('screen'))
@@ -213,6 +228,75 @@ function boot() {
     })
   }
   if (q.get('sheet')) openImportSheet()
+}
+
+/* ============================== scripted demo clips ============================== */
+// Demo-only (scripts/record-clip.sh), each inactive without its query. A take records the
+// stage alone, so what they show must be in the notes themselves.
+// waitdemo=<ms>: a stand-in player for Wait mode. Once the song has waited <ms> on the
+// same keys it presses them (through handleNoteOn, as the keyboard would) and lets go
+// ~200-250 ms later, so the take has the pause, the hit and its sound. It only presses
+// what the song waits for, which the hand filter already narrows to the hand practised.
+// viewcycle=<ms>: the next note view every <ms> (Cascade, Rainbow, Colornote, Classic).
+// handcycle=<ms>: the next hand every <ms> (left, right, both), playing straight on.
+function startDemoScripts(q) {
+  const waitMs = Number(q.get('waitdemo')) || 0
+  if (waitMs > 0) {
+    let key = '', since = 0
+    const offs = new Map()
+    setInterval(() => {
+      if (!player || !player.waiting || !player.needPitches.size) { key = ''; return }
+      const need = [...player.needPitches].sort((a, b) => a - b)
+      const now = performance.now()
+      if (need.join(',') !== key) { key = need.join(','); since = now; return }
+      if (now - since < waitMs) return
+      key = ''
+      for (const p of need) {
+        if (offs.has(p)) { clearTimeout(offs.get(p)); handleNoteOff(p) }   // a repeat before its release
+        handleNoteOn(p, 68 + Math.round(Math.random() * 20))
+        offs.set(p, setTimeout(() => { offs.delete(p); handleNoteOff(p) }, 200 + Math.random() * 50))
+      }
+    }, 8)
+  }
+  const viewMs = Number(q.get('viewcycle')) || 0
+  if (viewMs > 0) {
+    let i = Math.max(0, NOTE_VIEWS.indexOf(settings.view))
+    setInterval(() => {
+      if (!player) return
+      i = (i + 1) % NOTE_VIEWS.length
+      settings.view = NOTE_VIEWS[i]; player.setView(settings.view); syncHudButtons()
+    }, viewMs)
+  }
+  const handMs = Number(q.get('handcycle')) || 0
+  if (handMs > 0) {
+    const order = ['left', 'right', 'both']
+    let i = Math.max(0, order.indexOf(player ? player.handFilter : settings.hands))
+    setInterval(() => {
+      if (!player) return
+      i = (i + 1) % order.length
+      const wasActive = player.active      // setHandFilter pauses: carry on playing
+      settings.hands = order[i]; player.setHandFilter(settings.hands)
+      if (wasActive) player.play()
+      pumpAudio(); syncHudButtons()
+    }, handMs)
+  }
+}
+// fpdemo=1: C, Am, F, G (a bass note under each, held ~1.2 s), then a C chord held under a
+// little tune of its own notes (so the name stays C), played through handleNoteOn/Off so
+// the Playground names each chord as it sounds.
+function playFreeplayDemo() {
+  const steps = [
+    [0.3, [48, 55, 60, 64], 1.2], [1.6, [57, 60, 64, 69], 1.2], [2.9, [53, 57, 60, 65], 1.2], [4.2, [55, 59, 62, 67], 1.2],
+    [5.5, [48, 52, 55], 3.2],
+    [5.8, [67], 0.28], [6.15, [64], 0.28], [6.5, [60], 0.28], [6.85, [64], 0.28], [7.2, [67], 0.28], [7.55, [64, 67], 0.9]
+  ]
+  for (const [at, pitches, dur] of steps) {
+    pitches.forEach((p, i) => {
+      const t = at * 1000 + i * 14       // a hand lands a few ms apart, low to high
+      setTimeout(() => { if (freeplay) handleNoteOn(p, 66 + Math.round(Math.random() * 22)) }, t)
+      setTimeout(() => handleNoteOff(p), t + dur * 1000)
+    })
+  }
 }
 
 /* ============================== first-run setup ============================== */
