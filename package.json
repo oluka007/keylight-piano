@@ -1,0 +1,32 @@
+{
+  "name": "keylight-piano",
+  "productName": "Keylight",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Unofficial, open-source piano-learning app for the ROLI Piano M and LUMI Keys: falling notes, key lights, lessons and games, all on your Mac",
+  "license": "MIT",
+  "author": "scizerss",
+  "homepage": "https://github.com/scizerss/keylight-piano",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scizerss/keylight-piano.git"
+  },
+  "bugs": {
+    "url": "https://github.com/scizerss/keylight-piano/issues"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node scripts/test-watchdog.js && node scripts/test-take-download.js",
+    "package": "scripts/package.sh"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "os": [
+    "darwin"
+  ],
+  "devDependencies": {
+    "electron": "45.1.0"
+  }
+}

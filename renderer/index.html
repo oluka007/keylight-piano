@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keylight</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-screen="home">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7M10 17h4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 5-7 7 7 7"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5h3v14H8zM13 5h3v14h-3z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></symbol>
+    <symbol id="i-hands" viewBox="0 0 24 24"><path d="M7 20c-2 0-3-1.5-3-4V9.5a1.3 1.3 0 0 1 2.6 0V13M6.6 9V5.5a1.3 1.3 0 0 1 2.6 0V12M9.2 6.5a1.3 1.3 0 0 1 2.6 0v6.5M11.8 13l.4-3a1.3 1.3 0 0 1 2.5.4L13 17c-.6 2-2 3-4 3z" transform="translate(-1 0)"/><path d="M17 20c2 0 3-1.5 3-4V9.5a1.3 1.3 0 0 0-2.6 0V13M17.4 9V5.5a1.3 1.3 0 0 0-2.6 0V12" transform="translate(1 0)"/></symbol>
+    <symbol id="i-metro" viewBox="0 0 24 24"><path d="M9 3h6l3.5 18h-13z"/><path d="m12 15 5-8"/><path d="M7.5 15h9"/></symbol>
+    <symbol id="i-labels" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="4"/><path d="m8.5 16 3.5-8 3.5 8M9.8 13.2h4.4"/></symbol>
+    <symbol id="i-view" viewBox="0 0 24 24"><path d="M3.5 20 8 4M20.5 20 16 4M12 4v16"/><rect x="9.4" y="8" width="1.6" height="4" rx=".8"/><rect x="13.4" y="12" width="1.6" height="4" rx=".8"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 24 24"><path d="M17 4.5 20 7.5l-3 3"/><path d="M4 12V11a3.5 3.5 0 0 1 3.5-3.5H20"/><path d="M7 19.5 4 16.5l3-3"/><path d="M20 12v1a3.5 3.5 0 0 1-3.5 3.5H4"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/></symbol>
+    <symbol id="i-inst" viewBox="0 0 24 24"><path d="M9 17.5V6l11-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.3 2.4-5.4 3.6-8.3.4 1.6 1.4 2.8 2.4 3.3.2-2.6 1.3-4.9 3.3-6.3-.3 2.9 1.4 4.6 2.6 6.4.8 1.3 1.1 2.6 1.1 4.1 0 4-2.6 7-6.5 7z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7.2 6v12M12 6v12M16.8 6v12"/><path d="M5.6 6v6.5M9.6 6v6.5M14.4 6v6.5M19 6v6.5" stroke-width="2.6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="10" rx="2.5"/><path d="m16 11 5-3v8l-5-3"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M8 5v14M4.5 8.5 8 5l3.5 3.5M16 19V5M12.5 15.5 16 19l3.5-3.5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M3.5 6.5h12M3.5 11.5h9M3.5 16.5h6"/><path d="M18.5 17V8.5l3-1"/><circle cx="16.8" cy="17" r="1.8"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header id="topbar">
+    <div class="top-left">
+      <button id="back" class="iconbtn" title="Back"><svg><use href="#i-back"/></svg></button>
+      <div class="titles"><div id="title">Home</div><div id="subtitle"></div></div>
+    </div>
+
+    <!-- search: the original's centred "Search here" pill -->
+    <div class="top-search search-only">
+      <label class="search-wrap">
+        <svg><use href="#i-search"/></svg>
+        <input id="search" class="search-input" type="search" placeholder="Search here" autocomplete="off" spellcheck="false" aria-label="Search songs, lessons and games">
+      </label>
+    </div>
+
+    <!-- player: speed track (native: Wait · 0.5x · 0.75x · Full speed) -->
+    <div class="top-center play-only">
+      <div class="speed-track" id="speedTrack">
+        <span class="speed-rail"><span class="speed-thumb" id="speedThumb"></span></span>
+        <button data-speed="wait">Wait</button>
+        <button data-speed="0.5">0.5x</button>
+        <button data-speed="0.75">0.75x</button>
+        <button data-speed="1">Full speed</button>
+      </div>
+      <div class="fp-bar" id="freeplayBar">
+        <label>Key <select id="fpRoot"></select></label>
+        <label title="The arrow buttons on your keyboard step through the scales">Scale <select id="fpScale"></select></label>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <span id="kbStatus" class="kb-chip not-play"><i class="dot"></i><span id="kbStatusText">Keyboard</span></span>
+      <span id="battery" class="pill hidden"></span>
+      <div class="hud-actions play-only">
+        <!-- octave: − and + move the 24 keys (app.js shiftOctave); the label is the range they play now -->
+        <div class="hud-octave" role="group" aria-label="Octave">
+          <span class="oct-btns">
+            <button id="btnOctDown" class="oct-btn" title="Octave down (Z)" aria-label="Octave down"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+            <button id="btnOctUp" class="oct-btn" title="Octave up (X)" aria-label="Octave up"><svg><use href="#i-plus"/></svg></button>
+          </span>
+          <span class="lbl" id="lblOctave" title="Octave: the notes your keys play">C3–B4</span>
+        </div>
+        <button id="btnWatch" class="hudbtn" title="Watch the demo (1)"><svg><use href="#i-eye"/></svg><span class="lbl">Watch</span></button>
+        <button id="btnHands" class="hudbtn" title="Hands"><svg><use href="#i-hands"/></svg><span class="lbl" id="lblHands">Both</span></button>
+        <button id="btnLabels" class="hudbtn" title="Note labels"><svg><use href="#i-labels"/></svg><span class="lbl" id="lblLabels">Off</span></button>
+        <button id="btnView" class="hudbtn" title="Note view" aria-haspopup="menu" aria-expanded="false" aria-controls="viewMenu"><svg><use href="#i-view"/></svg><span class="lbl" id="lblView">Cascade</span></button>
+        <button id="btnMetro" class="hudbtn" title="Metronome"><svg><use href="#i-metro"/></svg><span class="lbl" id="lblMetro">Click</span></button>
+        <button id="btnLoop" class="hudbtn" title="Loop a section"><svg><use href="#i-loop"/></svg><span class="lbl" id="lblLoop">Loop</span></button>
+        <button id="btnInst" class="hudbtn" title="Instrument"><svg><use href="#i-inst"/></svg><span class="lbl" id="lblInst">Piano</span></button>
+        <button id="btnCamera" class="hudbtn" title="Hand tracking camera"><svg><use href="#i-camera"/></svg><span class="lbl">Camera</span></button>
+        <button id="btnLyrics" class="hudbtn hidden" title="Lyrics"><svg><use href="#i-lyrics"/></svg><span class="lbl">Lyrics</span></button>
+        <button id="btnRestart" class="hudbtn" title="Restart"><svg><use href="#i-restart"/></svg><span class="lbl" id="lblRestart">Restart</span></button>
+      </div>
+      <button id="openSettings" class="iconbtn not-play" title="Settings"><svg><use href="#i-gear"/></svg></button>
+    </div>
+  </header>
+
+  <main id="screen">
+    <!-- ================= HOME ================= -->
+    <section id="screen-home" class="screen">
+      <div class="home-head">
+        <div>
+          <div class="greeting" id="greeting">Good evening</div>
+          <div class="greeting-sub">Ready to play? Your keys will show you the way.</div>
+        </div>
+        <div class="home-stats">
+          <span class="stat-chip"><svg><use href="#i-flame"/></svg><b id="streakChip">0</b> day streak</span>
+          <span class="stat-chip"><svg><use href="#i-clock"/></svg><b id="minutesChip">0</b> min today</span>
+        </div>
+      </div>
+
+      <div class="hero" id="continueCard">
+        <div class="hero-art" id="continueArt"></div>
+        <div class="hero-body">
+          <div class="kicker" id="continueKicker">Continue learning</div>
+          <div class="hero-title" id="continueTitle">Twinkle Twinkle Little Star</div>
+          <div class="hero-sub" id="continueSub">Pick up where you left off</div>
+          <div class="hero-actions">
+            <button class="primary" id="continuePlay"><svg><use href="#i-play"/></svg>Play</button>
+            <button class="ghost" id="continuePractise">Practise</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="rail-section">
+        <div class="rail-head"><h2>Your learning path</h2><span class="rail-note" id="pathNote"></span></div>
+        <div class="rail" id="lessonRail"></div>
+      </section>
+
+      <section class="rail-section">
+        <div class="rail-head"><h2>Songs</h2><button class="link" data-go="search">See all<svg><use href="#i-chevron"/></svg></button></div>
+        <div class="rail" id="songRail"></div>
+      </section>
+
+      <section class="rail-section">
+        <div class="rail-head"><h2>Explore</h2></div>
+        <div class="explore">
+          <button class="explore-card ex-scales" data-go="toolbox">
+            <div class="ex-art"><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="ex-cap">Master the basics and C won't scare you</div>
+            <div class="ex-title">Scales &amp; chords</div>
+          </button>
+          <button class="explore-card ex-games" data-go="games">
+            <div class="ex-art"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="ex-cap">Take a break, break a record</div>
+            <div class="ex-title">Games</div>
+          </button>
+          <button class="explore-card ex-play" data-go="freeplay">
+            <div class="ex-art"><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+            <div class="ex-cap">Discover sounds and play without boundaries</div>
+            <div class="ex-title">Playground</div>
+          </button>
+        </div>
+      </section>
+
+      <section class="rail-section">
+        <div class="rail-head"><h2>Recently played</h2></div>
+        <div class="rail" id="recentList"></div>
+      </section>
+    </section>
+
+    <!-- ================= SEARCH ================= -->
+    <section id="screen-search" class="screen hidden">
+      <div class="chip-row">
+        <div class="chips" id="searchChips">
+          <button data-chip="songs" class="on">Songs</button>
+          <button data-chip="lessons">Lessons</button>
+          <button data-chip="games">Games</button>
+          <button data-chip="fav" class="chip-icon" title="Favourites" aria-label="Favourites"><svg><use href="#i-heart"/></svg></button>
+          <button data-chip="imported" class="hidden" title="Songs you added">Imported</button>
+        </div>
+        <div class="chip-actions">
+          <button class="chip-btn" id="openImport" title="Add a recording, MIDI or MusicXML file"><svg><use href="#i-plus"/></svg>Add a song</button>
+          <button class="sort" id="sortBtn" title="Change the order"><svg><use href="#i-sort"/></svg>Sort: <b id="sortLabel">Title</b></button>
+        </div>
+      </div>
+      <div id="libraryGrid" class="cover-grid"></div>
+      <div id="lessonList" class="lesson-grid hidden"></div>
+      <div id="searchGames" class="games-grid hidden"></div>
+      <div class="empty hidden" id="searchEmpty">Nothing here yet.</div>
+    </section>
+
+    <!-- ================= ACHIEVEMENTS ================= -->
+    <section id="screen-achievements" class="screen hidden">
+      <div class="ach-stats">
+        <div class="ach-tile t-flame"><svg><use href="#i-flame"/></svg><b id="achStreak">0</b><span>day streak</span></div>
+        <div class="ach-tile t-clock"><svg><use href="#i-clock"/></svg><b id="achMinutes">0</b><span>minutes played</span></div>
+        <div class="ach-tile t-star"><svg><use href="#i-star"/></svg><b id="achStars">0</b><span>stars earned</span></div>
+        <div class="ach-tile t-keys"><svg><use href="#i-keys"/></svg><b id="achSongs">0</b><span>songs played</span></div>
+      </div>
+      <h2 class="section-title">This week</h2>
+      <div class="week" id="weekBars"></div>
+      <h2 class="section-title">Badges</h2>
+      <div class="badges" id="badgeGrid"></div>
+      <h2 class="section-title">Best scores</h2>
+      <div class="best-list" id="bestList"></div>
+    </section>
+
+    <!-- ================= EXERCISES (toolbox) ================= -->
+    <section id="screen-toolbox" class="screen hidden">
+      <div class="tb-hero">
+        <div class="seg" id="tbType">
+          <button data-t="scale" class="on">Scales</button>
+          <button data-t="chord">Chords</button>
+        </div>
+        <div class="seg" id="tbHand">
+          <button data-h="both" class="on">Both hands</button>
+          <button data-h="left">Left</button>
+          <button data-h="right">Right</button>
+        </div>
+      </div>
+      <div class="tonics" id="tbTonic"></div>
+      <div class="tb-card">
+        <div>
+          <div class="kicker">Exercise</div>
+          <div class="tb-title" id="tbInfo">C major scale · both hands</div>
+          <div id="tbStars" class="tb-stars"></div>
+        </div>
+        <button id="tbStart" class="primary"><svg><use href="#i-play"/></svg>Practise</button>
+      </div>
+      <h2 class="section-title">Notes in this exercise</h2>
+      <div class="tb-notes" id="tbNotes"></div>
+    </section>
+
+    <!-- ================= GAMES ================= -->
+    <section id="screen-games" class="screen hidden">
+      <div class="games-grid" id="gameList"></div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section id="screen-settings" class="screen hidden">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>Keyboard lights</h3>
+          <label class="setting">Brightness <input id="brightness" type="range" min="30" max="255" value="255"></label>
+          <label class="setting">Light style
+            <select id="kbdMode">
+              <option value="Piano">Piano — white</option>
+              <option value="Pro">Pro — hand colours</option>
+              <option value="Stage">Stage — a colour per note</option>
+              <option value="User">User — your own colour</option>
+            </select>
+          </label>
+          <label class="setting" id="userColorRow">Your colour <input id="userColor" type="color" value="#a78bfa"></label>
+          <label class="setting">Pitch bend &amp; pressure <input id="exprToggle" type="checkbox"></label>
+          <div class="setting-row"><span>Light service</span><span id="daemonState">checking…</span></div>
+          <div class="setting-row hidden" id="batteryRow"><span>Keyboard battery</span><span id="kbBattery"></span></div>
+          <div class="setting-row"><span>Keys play</span><span>
+            <button class="oct-mini" id="setOctDown" title="Octave down" aria-label="Octave down"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+            <span id="kbRange">—</span>
+            <button class="oct-mini" id="setOctUp" title="Octave up" aria-label="Octave up"><svg><use href="#i-plus"/></svg></button>
+          </span></div>
+          <div class="setting-row"><span>Check sound, keys and lights</span><button class="mini-btn" id="runSetup">Run setup again</button></div>
+          <div class="setting-row"><span>Lights stuck or missing?</span><span><button class="mini-btn" id="testLights" title="A light runs across every key and back, then any light left on goes off">Test lights</button></span></div>
+        </div>
+        <div class="settings-card">
+          <h3>Sound</h3>
+          <label class="setting">Instrument <select id="instrument"></select></label>
+          <label class="setting">Master volume <input id="volume" type="range" min="0" max="100" value="80"></label>
+          <label class="setting">Audio output <select id="audioOutput"></select></label>
+          <div class="setting-row"><span>Sound delay</span><span id="audioLatency">—</span></div>
+          <label class="setting">Play the other hand for me <input id="accompanyToggle" type="checkbox"></label>
+          <label class="setting">Generated band <input id="bandToggle" type="checkbox"></label>
+          <label class="setting">Backing volume <input id="backingVolume" type="range" min="0" max="100" value="70"></label>
+          <div class="setting-row"><span>Backing (no piano)</span><span><span id="backingState">none</span>
+            <label class="mini-btn">Attach<input id="backingFile" type="file" accept="audio/*" hidden></label></span></div>
+          <div class="setting-row"><span>Full mix (Watch)</span><span><span id="fullState">none</span>
+            <label class="mini-btn">Attach<input id="fullMixFile" type="file" accept="audio/*" hidden></label></span></div>
+          <label class="setting"><span class="setting-text">Record my takes<small>Saves each run in the player as a video with Keylight’s sound to Movies › Keylight, for making videos.</small></span>
+            <input id="recordTakes" type="checkbox"></label>
+        </div>
+        <div class="settings-card">
+          <h3>Practice</h3>
+          <label class="setting">Count-in
+            <select id="selCountIn"><option value="0">Off</option><option value="2">2 beats</option><option value="4" selected>4 beats</option></select>
+          </label>
+          <label class="setting">When waiting
+            <select id="waitMode">
+              <option value="pauseAndSnap">Stop on the note</option>
+              <option value="pauseAndPlay">Stop just before it</option>
+            </select>
+          </label>
+          <label class="setting">Bend range
+            <select id="bendRange">
+              <option value="2">±2 semitones</option>
+              <option value="12">±12 semitones</option>
+            </select>
+          </label>
+          <div class="setting-row"><span>Voices</span><span id="voiceCount">0</span></div>
+          <div class="setting-row"><span>Expression</span><span id="mpeState">waiting for bend/pressure…</span></div>
+        </div>
+        <div class="settings-card cam-card">
+          <h3>Hand tracking <span class="beta">beta</span></h3>
+          <p class="cam-help">Point a camera down at the keyboard (an iPhone in Desk View works well). Keylight then shows which finger is over which key, before you press it.</p>
+          <label class="setting">Camera <select id="camSelect"><option value="">Default camera</option></select></label>
+          <label class="setting">Mirror the picture <input type="checkbox" id="camMirror"></label>
+          <div class="cam-preview"><canvas id="camSetupCanvas"></canvas><div class="cam-empty" id="camEmpty">Camera off</div></div>
+          <div class="cam-actions">
+            <button class="primary" id="camToggle">Start camera</button>
+            <button class="ghost" id="camAuto">Find the keys</button>
+            <button class="ghost" id="camManual">Click the end keys</button>
+          </div>
+          <div class="setting-row"><span>Status</span><span id="camStatus">Off</span></div>
+        </div>
+        <div class="settings-card">
+          <h3>Progress</h3>
+          <div class="setting-row"><span>Played today</span><span id="playedToday">0 min</span></div>
+          <button class="ghost danger" id="resetProgress">Reset local progress</button>
+          <button class="ghost danger" id="resetSettings">Reset settings</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= PLAYER ================= -->
+    <section id="screen-play" class="screen hidden">
+      <div class="canvas-wrap">
+        <canvas id="stage"></canvas>
+        <div class="score-float" id="scoreHud">—</div>
+        <div class="cam-pip hidden" id="camPip"><canvas id="camPipCanvas"></canvas><span class="cam-tag" id="camPipTag">Hands</span></div>
+        <div class="lyrics hidden" id="lyrics"><div class="ly-now" id="lyNow"></div><div class="ly-next" id="lyNext"></div></div>
+        <button class="rec-pill hidden" id="recPill" title="Recording this take. Click to stop and save it" aria-label="Recording. Stop and save the take"><i aria-hidden="true"></i>REC <span id="recTime">0:00</span></button>
+      </div>
+      <div class="player-bottom">
+        <button id="btnPlay" class="play-btn" title="Play / pause (space)"><svg><use href="#i-play"/></svg></button>
+        <span id="timeLabel" class="time">0:00 / 0:00</span>
+        <div class="progress" id="progress" title="Click to seek">
+          <div class="progress-fill" id="progressFill"></div>
+          <div class="loop-region" id="loopRegion"></div>
+          <div class="loop-marker start" id="loopMarkerA"></div>
+          <div class="loop-marker end" id="loopMarkerB"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav id="nav">
+    <button data-screen="home" class="on"><svg><use href="#i-home"/></svg><span>Home</span></button>
+    <button data-screen="search"><svg><use href="#i-search"/></svg><span>Search</span></button>
+    <button data-screen="achievements"><svg><use href="#i-trophy"/></svg><span>Achievements</span></button>
+  </nav>
+
+  <div class="toast" id="status" role="status" aria-live="polite"></div>
+</div>
+
+<!-- ================= RESULTS ================= -->
+<div id="results" class="hidden" role="dialog" aria-modal="true" aria-labelledby="resKicker resHead" aria-describedby="resAcc">
+  <div class="results-inner">
+    <div class="results-kicker" id="resKicker">SONG COMPLETE</div>
+    <h1 class="results-head" id="resHead">Great job!</h1>
+    <div class="results-stars" id="resStars"></div>
+    <div class="results-ring">
+      <svg viewBox="0 0 120 120"><defs><linearGradient id="ringGrad" gradientUnits="userSpaceOnUse" x1="120" y1="0" x2="0" y2="120"><stop offset="0" class="ring-stop-a"/><stop offset="1" class="ring-stop-b"/></linearGradient></defs><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" id="resRing" cx="60" cy="60" r="52"/></svg>
+      <div class="ring-label"><div class="results-big" id="resBig">0%</div><div class="results-sub" id="resSub">0 notes hit</div></div>
+    </div>
+    <div class="results-acc" id="resAcc"></div>
+    <div class="results-cards">
+      <div class="rcard k-perfect"><b id="resPerfect">0</b><span>Perfect</span></div>
+      <div class="rcard k-good"><b id="resGood">0</b><span>Good</span></div>
+      <div class="rcard k-early"><b id="resEarly">0</b><span>Early</span></div>
+      <div class="rcard k-late"><b id="resLate">0</b><span>Late</span></div>
+      <div class="rcard k-missed"><b id="resMissed">0</b><span>Missed</span></div>
+      <div class="rcard k-streak"><b id="resStreak">0</b><span>Best streak</span></div>
+    </div>
+    <div class="results-hands" id="resHands"></div>
+    <div class="celebrate" id="celebrate"></div>
+    <div class="results-actions">
+      <button id="resAgain" class="primary">Try again</button>
+      <button id="resWatch" class="ghost hidden">Watch again</button>
+      <button id="resPractice" class="ghost">Practise</button>
+      <button id="resNext" class="ghost hidden">Next song</button>
+      <button id="resClose" class="link">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ADD A SONG ================= -->
+<div id="importSheet" class="hidden">
+  <div class="sheet">
+    <button class="iconbtn sheet-close" id="importClose" title="Close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    <h2>Add a song</h2>
+    <p class="sheet-sub">A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on this Mac.</p>
+    <label class="dropzone" id="dropZone">
+      <input id="importFile" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.aif,.aiff,.mid,.midi,.xml,.musicxml,.mxl" hidden>
+      <div class="dz-icon"><svg><use href="#i-plus"/></svg></div>
+      <div class="dz-title">Drop a song here</div>
+      <div class="dz-sub">MP3 · M4A · WAV · FLAC · MIDI · MusicXML</div>
+      <span class="ghost dz-btn">Choose a file</span>
+    </label>
+    <div class="sheet-opts">
+      <label class="setting">Simplify a recording to melody + bass <input type="checkbox" id="impSimplify" checked></label>
+      <label class="setting">Find cover art and lyrics online <input type="checkbox" id="impLookup" checked></label>
+    </div>
+    <div class="imp-progress hidden" id="impProgress">
+      <div class="imp-stage" id="impStage">Reading the file</div>
+      <div class="imp-bar"><i id="impBar"></i></div>
+    </div>
+    <div class="imp-result hidden" id="impResult">
+      <div class="imp-cover" id="impCover"></div>
+      <div class="imp-fields">
+        <input id="impTitle" class="imp-input" placeholder="Title">
+        <input id="impArtist" class="imp-input" placeholder="Artist">
+        <div class="imp-meta" id="impMeta"></div>
+        <div class="imp-actions">
+          <button class="primary" id="impPlay"><svg><use href="#i-play"/></svg>Play now</button>
+          <button class="ghost" id="impAnother">Add another</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="dropOverlay" class="hidden"><div>Drop to add this song</div></div>
+
+<!-- player: note view picker, anchored to #btnView (items are built from VIEW_INFO in app.js) -->
+<div id="viewMenu" class="popover hidden" role="menu" aria-label="Note view"></div>
+
+<!-- first-run setup (app.js openSetup): sound, keyboard range, key lights, then Lesson 1.
+     The step text and checks are filled in by renderSetup from what the app sees live. -->
+<div id="onboarding" class="hidden" data-step="sound" role="dialog" aria-modal="true" aria-labelledby="obStepTitle">
+  <div class="ob-stage" aria-hidden="true">
+    <div class="ob-keys" id="obKeys"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="ob-blocks"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+  </div>
+  <div class="ob-side">
+    <div class="ob-kicker">WELCOME TO KEYLIGHT</div>
+    <h1 class="ob-title">Let’s set up your keyboard</h1>
+    <p class="ob-copy">Three quick checks, then your first lesson.</p>
+    <section class="ob-card">
+      <ol class="ob-steps" id="obSteps">
+        <li><button data-step="0"><i>1</i>Sound</button></li>
+        <li><button data-step="1"><i>2</i>Keyboard</button></li>
+        <li><button data-step="2"><i>3</i>Lights</button></li>
+        <li><button data-step="3"><i>4</i>Ready</button></li>
+      </ol>
+      <h2 class="ob-step-title" id="obStepTitle" tabindex="-1"></h2>
+      <p class="ob-step-copy" id="obStepCopy"></p>
+      <div class="ob-check" id="obCheck" data-state="wait" role="status">
+        <span class="ob-mark"><svg><use href="#i-check"/></svg></span>
+        <span class="ob-check-text" id="obCheckText"></span>
+        <span class="ob-answer hidden" id="obAnswer"><button class="mini-btn yes" id="obLightsYes">Yes</button><button class="mini-btn" id="obLightsNo">No</button></span>
+      </div>
+      <div class="ob-panel" data-panel="sound">
+        <label class="ob-volume"><span>Volume</span><input id="obVolume" type="range" min="0" max="100" value="80"></label>
+        <button class="mini-btn" id="obTestNote">Play a test note</button>
+        <p class="ob-note hidden" id="obLatency"></p>
+      </div>
+      <div class="ob-panel" data-panel="keyboard">
+        <p class="ob-hint">Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.</p>
+      </div>
+      <div class="ob-panel" data-panel="lights">
+        <button class="mini-btn hidden" id="obLightsAgain">Show the lights again</button>
+        <div class="ob-install hidden" id="obInstall">
+          <p>To install it you need Homebrew (brew.sh). Paste these two lines into Terminal, then quit and reopen Keylight:</p>
+          <!-- the README's "Install" commands; each flag stays on one line with its value -->
+          <pre class="ob-code" id="obCode">brew install uv python@3.13
+<span>uv tool install</span> <span>--python /opt/homebrew/bin/python3.13</span> <span>--from "git+https://github.com/hyperb1iss/blocksd@main"</span> <span>blocksd</span></pre>
+          <button class="mini-btn" id="obCopy">Copy</button>
+        </div>
+      </div>
+      <div class="ob-panel" data-panel="ready">
+        <ul class="ob-summary" id="obSummary"></ul>
+      </div>
+      <div class="ob-actions">
+        <button id="obNext" class="primary">Continue</button>
+        <button id="obSkip" class="ghost">Skip</button>
+      </div>
+    </section>
+  </div>
+  <button class="iconbtn ob-close hidden" id="obClose" title="Close setup" aria-label="Close setup"><svg><use href="#i-close"/></svg></button>
+  <!-- initMidi still writes the port it picked here; the setup shows its own live status -->
+  <span id="obDevice" hidden></span>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,398 @@
+# Keylight
+
+An open-source piano-learning app for the 24-key light-up keyboards ROLI made (Piano M
+and LUMI Keys), for people whose keyboard lost its app when ROLI Learn was discontinued.
+Falling notes in 3D over a keyboard that looks like yours, the real keys lighting up
+the next note, lessons, songs, games and a Playground, all running on your Mac with no
+account. Lighting goes through the open-source
+[blocksd](https://github.com/hyperb1iss/blocksd) daemon.
+
+![The player: falling notes over the keyboard, finger numbers for both hands](docs/images/player.png)
+
+> Keylight is an independent, unofficial project. It is not affiliated with, endorsed
+> by or supported by ROLI. ROLI, LUMI, Piano M and ROLI Learn are trademarks of their
+> respective owners, used here only to say which keyboards Keylight works with.
+> Keylight contains no ROLI software, firmware, artwork, sounds or lesson content.
+
+## What it does
+
+- Four note views: a 3D cascade, Rainbow, Colornote and Classic
+- The keyboard's own keys light up the next note, in four light styles you switch
+  with the keyboard's mode button
+- Wait mode (the song waits for you on every note), 0.5x / 0.75x / full speed, loop
+  a section, left, right or both hands, count-in, metronome, note names or finger
+  numbers
+- 19 songs, 5 lessons (Watch, Practise, Play), Scales & Chords, a Playground with 19
+  scales and live chord names, 4 arcade games, stars, streaks and achievements
+- Import your own MIDI, MusicXML or an audio file, which it turns into notes on your Mac
+- 8 instruments, sustain pedal, pitch bend and pressure
+- A hand-tracking beta: a camera over the keys shows which finger is over which key
+
+| Song library | Playground |
+|---|---|
+| ![Song library](docs/images/library.png) | ![Playground with chord names](docs/images/playground.png) |
+
+## Requirements
+
+- A Mac with Apple Silicon (M1 or later) on macOS 13 or newer
+- A ROLI Piano M or LUMI Keys over USB
+- [blocksd](https://github.com/hyperb1iss/blocksd) for the key lights (step 4 below)
+- To build from source: git and Node.js 22.12 or newer. Optional for the video tools
+  in `scripts/`: ffmpeg, and Python 3 with numpy (and scipy for `measure-take-sync.py`)
+
+## Install
+
+You need a Mac with Apple Silicon (M1 or later) on macOS 13 or newer, and the keyboard.
+
+1. Download `Keylight-<version>-mac.zip` from the
+   [Releases page](https://github.com/scizerss/keylight-piano/releases) and double-click it. You get a
+   `Keylight-<version>` folder with `Keylight.app` and a copy of these steps.
+2. Keylight is not notarised by Apple, so macOS refuses to open it until the download
+   quarantine is cleared. In Terminal:
+
+   ```sh
+   xattr -dr com.apple.quarantine ~/Downloads/Keylight-<version>/Keylight.app
+   ```
+
+   (Unzipped somewhere else? Type `xattr -dr com.apple.quarantine `, drag `Keylight.app`
+   onto the Terminal window and press Return.)
+3. Move `Keylight.app` to Applications.
+4. Install blocksd, the daemon that drives the key lights. With [Homebrew](https://brew.sh):
+
+   ```sh
+   brew install uv python@3.13
+   uv tool install --python /opt/homebrew/bin/python3.13 --from "git+https://github.com/hyperb1iss/blocksd@main" blocksd
+   ```
+
+   You never run it yourself: Keylight starts it, and restarts it if the keyboard
+   drops off it.
+5. Plug the keyboard in over USB, switch it on, and open Keylight.
+
+- The camera permission is only asked when you start hand tracking (Settings → Hand
+  tracking).
+- The keyboard's arrow and mode buttons need a one-line change to blocksd that is not
+  upstream yet (see [Hardware buttons](#hardware-buttons) below); the octave buttons and
+  everything else work without it.
+- Progress and the log live in `~/Library/Application Support/lumi-app/`, so updating
+  the app keeps your stars. If something goes wrong, attach `app.log` from there to
+  your report.
+
+## Build from source
+
+Needs an Apple Silicon Mac, git and Node.js 22.12 or newer.
+
+```sh
+git clone https://github.com/scizerss/keylight-piano.git keylight
+cd keylight
+npm ci
+env -u ELECTRON_RUN_AS_NODE npm start    # run from source
+npm test                                 # blocksd watchdog tests
+scripts/package.sh                       # build Keylight.app
+```
+
+`env -u ELECTRON_RUN_AS_NODE` is needed when launching from another Electron app,
+otherwise Electron runs as plain Node.
+
+`scripts/package.sh` builds `Keylight.app` from the Electron in `node_modules`
+(app code: `main.js`, `package.json` and `renderer/`), signs it ad hoc, installs it as
+`~/Applications/Keylight.app` and zips it with the install steps above as
+`dist/Keylight-<version>-mac.zip`. The previous bundle is renamed to
+`Keylight.app.old`, not deleted, so a copy that is still running carries on (delete it
+once Keylight has quit). It also
+keeps a Keylight shortcut and `Start Keylight.command` (runs it from a Terminal
+window) on the Desktop; `scripts/package.sh --zip-only` builds the zip without
+installing. The icon comes from `assets/icon.png` via `scripts/make-icon.sh`; without
+one a generated stand-in is used. Release checklist: `docs/RELEASING.md`.
+
+### Test and screenshot flags
+
+Always give test runs their own profile with `LUMI_USERDATA`, so they don't write
+stars and lessons into your real progress or take the real app's port:
+
+```sh
+LUMI_USERDATA=/tmp/keylight-test LUMI_SELFTEST=1 env -u ELECTRON_RUN_AS_NODE npm start
+```
+
+- `LUMI_SELFTEST=1` runs the engine checks and prints `SELFTEST …` lines to stdout and
+  to the profile's `app.log` (`$LUMI_USERDATA/app.log` for a test profile,
+  `~/Library/Application Support/lumi-app/app.log` for the real one). The window stays
+  hidden and the app keeps running: press Ctrl-C after `SELFTEST done` (about a
+  minute). Two checks go online (cover and lyrics lookup, the hand-tracking model).
+- `LUMI_NO_KEYBOARD=1` keeps a test run off MIDI and the key lights, so it neither
+  hears the keyboard nor takes its lights from a Keylight you are playing in.
+- `LUMI_QUERY=perf=1` prints `PERF …` lines: each instrument's onset and ring-down, and
+  how long a key press can wait on the main thread while a song plays.
+- `LUMI_SHOT=/tmp/x.png` captures the window `LUMI_SHOT_DELAY` ms (default 3000) after
+  the page loads, and quits.
+- `LUMI_FRAMES=/tmp/frames` saves `frame-00001.png`, `frame-00002.png`, … instead, at
+  `LUMI_FRAMES_FPS` (15) for `LUMI_FRAMES_SECONDS` (12), starting `LUMI_SHOT_DELAY` ms
+  after load, then quits. A capture that runs late repeats the previous frame, so the
+  frames always play back in real time.
+- `LUMI_QUERY="demo=twinkle&pos=3&view=RAINBOW&labels=names"` deep-links into the
+  player; `screen=home|search|achievements|toolbox|games|settings`, `chip=lessons`,
+  `freeplay=0` also work.
+- `LUMI_WATCHDOG=1` (or `0`) turns the periodic blocksd check on (or off). Test profiles
+  only run the check at start-up, so they never restart the daemon the real app uses.
+
+### Demo videos
+
+```sh
+scripts/record.sh 'demo=twinkle&pos=2' ~/Desktop/twinkle.mp4 8   # a song demo starts playing by itself; add autoplay=<ms> to control when
+```
+
+runs the app from the checkout with a throwaway profile, records `LUMI_QUERY` for the
+given seconds (default 12) and writes an H.264 mp4 (15 fps) and a gif next to it
+(720 px wide, 12 fps). Needs ffmpeg (`brew install ffmpeg`). For a 60 fps clip with the
+app's sound, use `scripts/record-clip.sh` (see Recording takes).
+
+## Screens
+
+- **Home**: continue card, your learning path (lessons with Watch → Practise →
+  Challenge steps), songs, explore (scales & chords, games, playground), recently played.
+- **Search**: the "Search here" field, Songs / Lessons / Games / Favourites chips (and
+  Imported once you have added a song), Sort by title, level or recently played,
+  illustrated covers with level badges, and **Add a song** (also: drop a file anywhere
+  on the window).
+- **Achievements**: streak, minutes, stars, songs played, this week's practice, badges,
+  best scores.
+- **Player**: full screen. Speed track (Wait · 0.5x · 0.75x · Full speed, where Wait is
+  practice mode), Watch, hands, labels, view, metronome, loop, instrument, restart;
+  falling notes in four views; play button and seekable progress bar with loop markers.
+- **Results**: stars, accuracy ring, perfect/good/early/late/missed, per-hand accuracy,
+  next steps.
+- **Settings** (gear icon): lights, sound, practice, progress.
+
+## Adding your own songs
+
+Search → **Add a song**, or drop a file on the window:
+
+- **Recordings** (MP3, M4A, WAV, FLAC, AAC, OGG, AIFF) are turned into notes on this Mac
+  by Spotify's open-source Basic Pitch model. *Simplify to melody + bass* keeps the top
+  note and a bass line, which is far easier on 24 keys than every voice of a full mix.
+  Works best on piano or solo-instrument recordings. The original recording plays along
+  in sync while you play, and keeps its pitch at 0.5x / 0.75x. Recordings up to 20
+  minutes can be added.
+- **MIDI** and **MusicXML** files are read as written.
+- Title, artist and cover come from the file's tags (or a "Artist - Title" file name).
+  With *Find cover art and lyrics online* on, missing covers come from the iTunes Search
+  API and time-synced lyrics from LRCLIB; they scroll at the top of the player.
+- Drop a `.lrc` lyrics file while a song is open to add or replace its lyrics.
+- Imported songs are kept in the app's own library (IndexedDB) with their audio, cover
+  and lyrics, marked YOURS; hover a tile to remove one.
+
+YouTube and Spotify links are not supported: Spotify streams are DRM-protected and
+downloading YouTube audio breaks its terms. Import a file you have instead.
+
+`scripts/build-vendor.sh` rebuilds `renderer/vendor/` (Basic Pitch + TensorFlow.js,
+music-metadata) and `renderer/models/basic-pitch/` from npm.
+
+## Playground
+
+Free play with the keyboard's own 19 scales (Major, Minor, Pentatonic, Blues, modes,
+Japanese, Whole tone, Chromatic, …) on any key: the scale's keys glow faintly in the
+light style's colour, the root brighter, and every key you press sends up a bubble.
+
+## Hand tracking (beta)
+
+Settings → Hand tracking: point a camera down at the keys (an iPhone in Desk View works
+best), press **Find the keys**, and numbered finger badges appear over the keys your
+fingers are above. Details, hardware options and the roadmap: `docs/HAND-TRACKING.md`.
+
+## Timing
+
+Everything the app plays (the song in Watch, the other hand and out-of-range notes in
+Play/Practise, generated band, metronome, count-in) is scheduled on the audio clock
+about 200 ms ahead by `renderer/scheduler.js`, so notes start exactly on time no
+matter how the screen refreshes, and repeated notes are struck again. The visible
+position subtracts the audio output latency, so falling notes, key lights, wait
+gating and scoring line up with what you hear.
+
+## Keyboard octave
+
+The app sets the keyboard's octave so its 24 keys play exactly the notes the song's
+window lights. It learns the keys' range from what they actually send: a note outside
+the expected range, or pressing the same note an octave off twice while practice
+waits, recalibrates it. Move the octave with the − / + buttons on the keyboard, the
+Octave − / + at the top right of the player, Z / X, or Settings → Keys play.
+
+The keyboard's arrow buttons depend on where you are: in a song, left is play/pause and
+right restarts (with the loop on, they move it a section earlier or later); on the
+results, right takes the highlighted next step and left closes them; on Home, right
+opens the Continue song; in the Playground they step through the scales. A tap on the
+mode button changes the light style; holding it for about half a second in a song
+switches between Wait and Play.
+
+On first launch a short setup checks sound, the keyboard (press the far-left key, then
+the far-right one) and the lights; Settings → Run setup again repeats it. Settings →
+Keyboard lights → Test lights runs a light across every key and clears any stuck
+light; the keyboard's battery level shows there too. In the Playground the chord you
+hold is named above the keys.
+
+## Lighting
+
+Per-key RGB through blocksd (`renderer/daemon.js`). blocksd's program owns the LEDs,
+so the app draws the keys on every screen, in the light style chosen in Settings (or
+with the keyboard's mode button):
+
+- **Piano**: white. Keys are dark until you play them.
+- **Pro**: hand colours. Song notes are blue (left hand) or orange (right hand); keys
+  you play light in the colour of their half of the keyboard. Every C glows faintly in
+  its half's colour.
+- **Stage**: a colour per note. The whole keyboard glows faintly in a rainbow.
+- **User**: your own colour (Settings → Your colour) for everything.
+
+In a song the next note group is dim, the note sounding now is at full colour, notes
+you must press pulse while practice waits, and judgements flash. After a song the
+keys play a star ceremony. The device UID is a 64-bit integer, so it is passed as raw
+decimal text (a JS Number would corrupt it).
+
+The app starts blocksd (`~/.local/bin/blocksd run`) when it isn't running, and a
+watchdog in `main.js` asks it for its devices every 20 s. If blocksd has listed no
+device for a minute while macOS still shows the keyboard on USB (`ioreg -p IOUSB`), the
+keyboard has dropped off the daemon: the app restarts blocksd, at most once every
+3 minutes, and notes it in `app.log` (`[watchdog]` / `[daemon]` lines).
+
+## Sound
+
+`renderer/instruments.js` is a local synth with eight instruments: Grand Piano,
+Electric Piano, Flute, Cello, String Ensemble, Bass, Synth Lead, Synth Pad.
+
+- Every instrument speaks within 2–15 ms of the key (slow fade-ins are heard as lag;
+  the piano's onset is 1.7 ms). Piano, e-piano and bass ring down naturally while the
+  key is held (a held middle C is still audible after 6 s; lower notes ring longer),
+  and stop when it is let go.
+- Loudness: a middle C at mf peaks around −8 dBFS with the master at 80%, all eight
+  instruments sit within 1.6 dB of each other, and a soft limiter on the synth bus
+  rounds off big chords instead of clipping (no compressor: it would add delay).
+- **Audio output** (Settings → Sound) picks the device the sound goes to and shows the
+  sound delay: the app's own buffer (2.7 ms) plus what the device adds. The MacBook's
+  speakers add about 28 ms, a USB interface about 7 ms, Bluetooth headphones far more;
+  for a tight feel use wired headphones or an interface.
+- A sustain pedal (MIDI CC 64) keeps let-go notes ringing until the pedal comes up.
+- **Pitch bend & pressure** (Settings → Keyboard lights) turns the keyboard's expression
+  on or off, on the device for all four of its modes, and in the app. With it on,
+  wiggling a key bends it and pressing into a held key makes flute, strings and synths
+  louder and brighter. Pressure only adds: resting on a key never makes it quieter, and
+  struck instruments ignore it, like a real piano.
+
+Cover art for the built-in songs was made with an image model and lives in
+`renderer/covers/`; the app icon is `assets/icon.png`.
+
+## Recording takes
+
+**Record my takes** (Settings → Sound) records each run in the player as a video of the
+falling notes and keyboard, with Keylight's own sound (taken after the volume, as the
+speakers get it), for making videos. A take starts when a song, lesson, game or
+exercise starts playing, keeps going through pauses and restarts, and is saved when
+the results show, you leave the player or open another song; the Playground is
+recorded from entering it to leaving it. A red **REC** pill over the notes shows a
+take is running; click it to stop and save early. Takes stop by themselves after 15
+minutes (a run left playing, a loop say, is then not recorded again), and one still
+running when you quit is saved first. While a take records,
+the picture keeps its size if you resize the window (shown scaled to fit until the
+take ends). With the switch off nothing is recorded and nothing of the recorder runs.
+
+Each take is two files in **Movies → Keylight**: `keylight-take-YYYYMMDD-HHMMSS.mp4`
+(60 fps H.264 + AAC) and a `.json` sidecar with the song, mode, speed, hands, view,
+start time, output latency and every key, release and sustain-pedal change you
+played (`midi`, `t` in seconds into the video). To film your hands on the keyboard at
+the same time, let the phone's mic hear the Mac's speakers: the take's clean sound
+lines the phone video up with it. In the file, the sound sits where the speakers
+played it against the picture: the recorder corrects Chrome's own offset of about
+45 ms with an edit list on the sound track, and makes the durations in Chrome's
+fragments add up, so QuickTime, iMovie and Photos play the take in sync as ffmpeg-based
+tools do (`sync` in the sidecar says what was done; `scripts/measure-take-sync.py`
+checks it). `width`/`height` are the video's own (H.264 drops an odd row or column of
+the stage; `canvasWidth`/`canvasHeight` are the stage's).
+
+Demo clips with sound, without touching the screen or the speakers:
+
+```sh
+scripts/record-clip.sh 'demo=twinkle&pos=0' ~/Desktop/twinkle.mp4 8
+```
+
+runs the app quietly from the checkout (throwaway profile, invisible window, sound
+muted; the take records it anyway), lets it play the song itself (`mode=WATCH` unless
+the query sets a mode) and writes a constant 60 fps H.264 mp4 (crf 16) with AAC 256k
+audio, plus its sidecar as `twinkle.json`. Seconds default to 12. Needs ffmpeg. Under
+the hood this is the `rec=<seconds>` query (with `demo=…`), `LUMI_REC_DIR=<folder>` (where
+takes are saved instead of Movies → Keylight) and `LUMI_REC_QUIT=1` (quit once saved).
+
+## Backing tracks
+
+Settings → Sound lets you attach a backing track without piano (used while you play)
+and a full mix (used in Watch). Both follow play, pause, seek and speed. Without
+them, the optional generated band adds bass and hi-hat.
+
+## Hardware buttons
+
+Button presses come through blocksd's `button` events. Upstream blocksd does not yet
+say which button was pressed, so the arrow and mode buttons need a one-line change in
+blocksd (tested on blocksd commit `45e3751`; the octave buttons and everything else
+work without it). In the installed blocksd's `blocksd/api/events.py`, add `button_id`
+to `broadcast_button`:
+
+```diff
+         msg = {
+             "type": "button",
+             "uid": event.uid,
++            "button_id": event.button_id,
+             "action": "press" if event.is_down else "release",
+         }
+```
+
+With uv's default layout the file is
+`~/.local/share/uv/tools/blocksd/lib/python3.13/site-packages/blocksd/api/events.py`.
+Reinstalling blocksd undoes the change; then quit and reopen Keylight.
+
+## Files
+
+```
+main.js                 Electron main: local server, MIDI permission, blocksd start + watchdog,
+                        screenshots and demo-video frames
+renderer/app.js         screens, wiring, render loop, lights, octave sync, results
+renderer/player.js      transport (modes, wait, loop, count-in, clocks)
+renderer/scheduler.js   audio-clock scheduling of song, accompaniment, band, clicks
+renderer/scoring.js     five-way judgement, aggregates, stars
+renderer/views.js       note views + on-screen keyboard (canvas)
+renderer/songloader.js  MIDI/MusicXML → song model with hands + note groups
+renderer/audio.js       synth, clicks, backing-track player, the take recorder's sound tap
+renderer/recorder.js    take recorder: stage canvas + app sound → mp4 + JSON sidecar
+renderer/daemon.js      blocksd WebSocket client (24-key frames, config, brightness)
+renderer/theme.js       colour tokens
+renderer/fonts/         Outfit (SIL Open Font License, see OFL.txt)
+renderer/songs/         19 public-domain songs (MusicXML), arranged for this project
+scripts/package.sh      build, sign, install and zip Keylight.app
+scripts/make-icon.sh    assets/icon.png → assets/icon.icns
+scripts/record.sh       demo video (mp4 + gif) from LUMI_FRAMES
+scripts/record-clip.sh  demo clip with sound (60 fps mp4) from the take recorder
+scripts/measure-take-sync.py  sound/picture sync of a take or clip (numpy + scipy)
+scripts/test-watchdog.js  blocksd watchdog tests (npm test)
+scripts/test-take-download.js  which downloads main.js saves as takes (npm test)
+scripts/test-sync-take.py  synthetic end-to-end test of sync-take.py (needs ffmpeg)
+scripts/find-electron.sh  finds the Electron.app the scripts run
+scripts/flip-fuses.js   turns off Electron's RunAsNode and inspect fuses in the built app
+scripts/placeholder-icon.js  stand-in icon when assets/icon.png is missing
+scripts/build-vendor.sh rebuilds renderer/vendor/ and the Basic Pitch model
+scripts/vendor-licenses.sh  collects the bundled npm packages' licences
+scripts/sync-take.py    lines a phone video up with a take and renders them together
+LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bundled
+```
+
+## Notes
+
+- The app never downloads music. Songs are public-domain MusicXML; import your own
+  `.mid` / MusicXML files from Search.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome: open an
+[issue](https://github.com/scizerss/keylight-piano/issues). If something goes wrong,
+attach `~/Library/Application Support/lumi-app/app.log`. Before a pull request, run
+`npm test`, and run the self-test (`LUMI_SELFTEST=1`, see Test and screenshot flags);
+it should end with `SELFTEST done`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Bundled third-party code, models and fonts keep their own
+licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

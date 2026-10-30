@@ -1,0 +1,12 @@
+# build output (scripts/package.sh)
+dist/
+*.zip
+# made from assets/icon.png by scripts/make-icon.sh on every build
+assets/icon.iconset/
+assets/icon.icns
+.DS_Store
+# local tool state
+.claude/
+# installed by npm install / npm ci
+node_modules/
+__pycache__/
