@@ -90,9 +90,10 @@ and has not been tried with the keyboard on Windows yet: please say how it goes 
 
 1. Download `Keylight-<version>-win-x64.zip` from the
    [Releases page](https://github.com/scizerss/keylight-piano/releases).
-2. Right-click the zip, choose **Extract All...** and extract it, for example into
-   Documents. You get a `Keylight-<version>-win-x64` folder with a `Keylight` folder
-   and a copy of these steps.
+2. Right-click the zip, choose **Extract All...**, then **Extract**. Windows makes a
+   `Keylight-<version>-win-x64` folder next to the zip, with a `Keylight` folder and a
+   copy of these steps in it. You can move that folder anywhere, for example into
+   Documents.
 3. Open the `Keylight` folder and double-click `Keylight.exe`. Keylight is not
    code-signed, so the first time Windows may say "Windows protected your PC": click
    **More info**, then **Run anyway**. (Right-click the zip, **Properties**, tick
@@ -164,8 +165,10 @@ npm's `electron` package ships, renames `electron.exe` to `Keylight.exe` with th
 from `assets/icon.ico` and Keylight's version details, turns off the same Electron fuses
 as the Mac build, and adds the app, the licences and a `README.txt` with the
 [Install on Windows](#install-on-windows) steps. `--keep` also leaves the unzipped
-folder in `dist/`. `assets/icon.ico` is made from `assets/icon.png` on a Mac by
-`node scripts/make-ico.js`.
+files in `dist/Keylight-<version>-win-x64/`, laid out as Extract All lays them out.
+`assets/icon.ico` is made from `assets/icon.png` on a Mac by `node scripts/make-ico.js`.
+The repository's `.gitattributes` gives every checkout LF line ends, so the zip built
+on Windows holds the same files as the one built on a Mac.
 
 ### Test and screenshot flags
 

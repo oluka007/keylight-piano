@@ -1,8 +1,9 @@
 // Builds the Windows (x64) release zip, on macOS, Linux or Windows alike:
 //   dist/Keylight-<version>-win-x64.zip
-// holding Keylight-<version>-win-x64/README.txt (the README's "Install on Windows" steps)
-// and Keylight-<version>-win-x64/Keylight/ (Keylight.exe, Electron's files, the app in
-// resources/app, and the licences).
+// holding README.txt (the README's "Install on Windows" steps, as plain text) and
+// Keylight/ (Keylight.exe, Electron's files, the app in resources/app, and the licences)
+// at its top. Windows' Extract All puts them in a Keylight-<version>-win-x64 folder by
+// itself, so the zip has no folder of its own around them.
 //
 // 1. Electron for win32-x64, the version package.json pins, is downloaded once into a
 //    cache (KEYLIGHT_CACHE, else ~/Library/Caches/keylight, %LOCALAPPDATA%\keylight\Cache
@@ -14,7 +15,8 @@
 //    --inspect fuses are turned off (scripts/flip-fuses.js).
 // 3. The zip is written and read back: every entry must inflate to its CRC.
 //
-// Usage: npm run package:win [-- --keep]   (--keep also leaves the unzipped folder in dist/)
+// Usage: npm run package:win [-- --keep]   (--keep also leaves the unzipped files in
+// dist/Keylight-<version>-win-x64/, as Extract All lays them out)
 // Needs npm ci (--ignore-scripts is enough: the Mac's Electron is not used).
 // The exe is not code-signed, so Windows SmartScreen warns on first run (README.txt).
 const fs = require('node:fs')
@@ -128,10 +130,11 @@ function walk(dir, prefix = '') {
   return out
 }
 
-// Zips the folder `base` (under root) as `base/...`. Files are deflated a few at a time
-// on zlib's thread pool and written in order.
+// Zips the folder `base` (under root) as `base/...`, or with no base what is in root, at
+// the zip's top. Files are deflated a few at a time on zlib's thread pool and written
+// in order.
 async function writeZip(zipFile, root, base, { level = 9, date = new Date(), parallel = 4 } = {}) {
-  const names = [base + '/', ...walk(path.join(root, base), base + '/')]
+  const names = base ? [base + '/', ...walk(path.join(root, base), base + '/')] : walk(root)
   const { time, date: day } = dosDateTime(date)
   const fd = fs.openSync(zipFile, 'w')
   const central = []
@@ -227,9 +230,15 @@ async function describeExe(file) {
   const vi = ResEdit.Resource.VersionInfo.fromEntries(res.entries)[0]
   const strings = vi ? vi.getStringValues(vi.getAllLanguagesForStringValues()[0]) : {}
   const icons = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
+  // each icon image: its size and whether it is a PNG or a bitmap (DIB)
+  const images = new Map(res.entries.filter((e) => e.type === 3 && icons.length && e.lang === icons[0].lang).map((e) => [e.id, Buffer.from(e.bin)]))
   return {
     machine: 'x64', subsystem: 'GUI', strings,
     iconSizes: icons.length ? icons[0].icons.map((i) => i.width || 256) : [],
+    iconFormats: icons.length ? icons[0].icons.map((i) => {
+      const bin = images.get(i.iconID)
+      return (i.width || 256) + ':' + (!bin ? 'missing' : bin.readUInt32BE(0) === 0x89504e47 ? 'png' : bin.readUInt32LE(0) === 40 ? 'bmp' : 'unknown')
+    }) : [],
     fuses: readFuses(buf, file)
   }
 }
@@ -319,12 +328,21 @@ function copyTree(from, to) {
   fs.cpSync(from, to, { recursive: true, filter: (src) => path.basename(src) !== '.DS_Store' })
 }
 
-// The README's "## Install on Windows" section, for README.txt (Windows line ends)
-function windowsInstallText(version) {
-  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n')   // a Windows checkout has CRLF
+// Markdown to the plain text Notepad shows: [text](url) becomes "text: url", and the
+// **bold** and `code` marks go
+function plainText(md) {
+  return md
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text, url) => url.startsWith('#') ? text : `${text}: ${url}`)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+}
+
+// The README's "## Install on Windows" section, for README.txt (plain text, Windows line ends)
+function windowsInstallText(version, readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')) {
+  readme = readme.replace(/\r\n/g, '\n')   // in case a checkout has CRLF
   const m = readme.match(/^## Install on Windows\n([\s\S]*?)(?=^## |(?![\s\S]))/m)
   if (!m) throw new Error('README.md has no "## Install on Windows" section')
-  const body = m[1].trim().replaceAll('<version>', version)
+  const body = plainText(m[1].trim().replaceAll('<version>', version))
   return (`${NAME} ${version} for Windows (x64)\n\n${body}\n\nhttps://github.com/scizerss/keylight-piano\n`).replace(/\r?\n/g, '\r\n')
 }
 
@@ -354,7 +372,7 @@ async function main() {
   const folder = `${NAME}-${version}-win-x64`
   const stage = path.join(dist, '.win-stage')
   fs.rmSync(stage, { recursive: true, force: true })
-  const pkgDir = path.join(stage, folder)
+  const pkgDir = path.join(stage, folder)   // what goes in the zip, at its top
   const appDir = path.join(pkgDir, NAME)
   fs.mkdirSync(appDir, { recursive: true })
   try {
@@ -383,7 +401,7 @@ async function main() {
     const fuses = info.fuses
     if (fuses[0] !== '0' || fuses[2] !== '0' || fuses[3] !== '0') throw new Error('fuses did not flip: ' + fuses)
     console.log(`  exe        ${NAME}.exe: ${info.machine} ${info.subsystem}, ${info.strings.ProductName} ${info.strings.FileVersion}, ` +
-      `icon ${info.iconSizes.length} sizes, fuses ${fuses} (RunAsNode, NodeOptions and --inspect off)`)
+      `icon ${info.iconFormats.join(' ')}, fuses ${fuses} (RunAsNode, NodeOptions and --inspect off)`)
 
     fs.writeFileSync(path.join(pkgDir, 'README.txt'), windowsInstallText(version))
 
@@ -391,7 +409,7 @@ async function main() {
     const zip = path.join(dist, folder + '.zip')
     fs.rmSync(zip, { force: true })
     const t0 = Date.now()
-    const count = await writeZip(zip, stage, folder)
+    const count = await writeZip(zip, pkgDir)
     const check = verifyZip(zip)
     if (check.entries.length !== count) throw new Error(`the zip lists ${check.entries.length} entries, ${count} were written`)
     console.log(`  zip        ${path.relative(ROOT, zip)} (${(fs.statSync(zip).size / 1e6).toFixed(1)} MB, ${count} entries, ` +
@@ -407,7 +425,7 @@ async function main() {
   }
 }
 
-module.exports = { listZip, readZipEntry, extractZip, writeZip, verifyZip, describeExe, windowsInstallText, dosDateTime }
+module.exports = { listZip, readZipEntry, extractZip, writeZip, verifyZip, describeExe, windowsInstallText, plainText, dosDateTime }
 
 if (require.main === module) {
   main().catch((e) => { console.error('error: ' + (e && e.message)); process.exit(1) })

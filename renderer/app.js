@@ -3459,6 +3459,18 @@ async function synthTestRecording(name, tune) {
 /* ============================== self test ============================== */
 async function runSelfTest() {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  // which page this is (scripts/selftest.js checks it against the system it runs on, so CI
+  // shows the Windows page really ran on Windows) and whether Web MIDI with sysex opens.
+  // The MIDI check runs with nokb too: it only lists the ports, never listens or sends,
+  // and closes them again (a CI runner has none, so it expects 0 and 0 there).
+  console.log(`SELFTEST platform isWin=${IS_WIN} reported=${(navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || 'unknown'}`)
+  try {
+    const m = await Promise.race([navigator.requestMIDIAccess({ sysex: true }),
+      new Promise((_r, reject) => setTimeout(() => reject(new Error('no answer in 10 s')), 10000))])
+    const ports = [...m.inputs.values(), ...m.outputs.values()]
+    console.log(`SELFTEST midi access ok sysex=${m.sysexEnabled} inputs=${m.inputs.size} outputs=${m.outputs.size}`)
+    for (const port of ports) port.close().catch(() => {})
+  } catch (e) { console.log('SELFTEST midi access FAIL ' + ((e && (e.name + ': ' + e.message)) || e)) }
   try {
     const res = await fetch('songs/twinkle.xml')
     song = await loadSongFile({ name: 'twinkle.xml', text: () => res.text() })

@@ -13,9 +13,10 @@
    trip through the zip. Plain `scripts/package.sh` also installs the build in
    `~/Applications` and refreshes the Desktop shortcuts.
    `npm run package:win` writes `dist/Keylight-<version>-win-x64.zip` (any system: it
-   downloads Electron for Windows, checked against npm's `electron` checksums): a
-   `Keylight-<version>-win-x64` folder with `README.txt` (the README's "Install on
-   Windows" section) and a `Keylight` folder holding `Keylight.exe`. CI's `windows`
+   downloads Electron for Windows, checked against npm's `electron` checksums):
+   `README.txt` (the README's "Install on Windows" section, as plain text) and a
+   `Keylight` folder holding `Keylight.exe`, at the top of the zip, since Windows'
+   Extract All makes the `Keylight-<version>-win-x64` folder itself. CI's `windows`
    job builds the same zip and keeps it for a week as the `keylight-win-x64` artifact.
 4. Try the zip the way a tester gets it: download it with a browser (so macOS
    quarantines it), unzip, and follow `README.txt` on a Mac user account that has
@@ -23,6 +24,8 @@
    follow its `README.txt` (SmartScreen's **More info** > **Run anyway**), with the
    keyboard plugged in: the setup's Lights step should run a light across the keys.
 5. Attach both zips to a GitHub release; a short clip from `scripts/record.sh` helps.
+   The README's install steps send people to the Releases page, so the release with
+   the Windows zip should be up before the "Install on Windows" section reaches `main`.
 
 The build is ad-hoc signed and not notarised, hence the `xattr` step for testers. A
 Developer ID signature plus notarisation would remove it. It is Apple Silicon only:

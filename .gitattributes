@@ -1,0 +1,19 @@
+# Every checkout gets the same bytes, LF line ends on Windows too, so a release zip built
+# on Windows (CI) holds the same files as one built on a Mac
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.gif binary
+*.woff2 binary
+*.wasm binary
+*.task binary
+*.bin binary
+*.mid binary
+*.mxl binary
+*.zip binary
+
+# vendored licence texts, kept byte for byte (this one has some CRLF lines)
+renderer/vendor/LICENSES.txt -text

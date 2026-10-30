@@ -1,14 +1,17 @@
 // Unit tests for the Windows build's pieces: node scripts/test-package-win.js
 // The zip writer and reader of scripts/package-win.js (round trip, CRC check, unsafe
-// names refused), the fuse flip of scripts/flip-fuses.js on a made-up fuse wire, and
-// README.txt coming from the README's "Install on Windows" section. No download, no exe.
+// names refused, a zip with no folder of its own), the fuse flip of scripts/flip-fuses.js
+// on a made-up fuse wire, README.txt coming from the README's "Install on Windows"
+// section as plain text, and assets/icon.ico (bitmaps up to 64 px, PNG above, as
+// scripts/make-ico.js writes it). No download, no exe.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
-const { listZip, extractZip, writeZip, verifyZip, windowsInstallText, dosDateTime } = require('./package-win.js')
+const { listZip, extractZip, writeZip, verifyZip, windowsInstallText, plainText, dosDateTime } = require('./package-win.js')
+const { SIZES, BMP_UP_TO, decodePng, dibFromRgba } = require('./make-ico.js')
 const { SENTINEL, flipFusesInBuffer, readFuses } = require('./flip-fuses.js')
 
 let n = 0
@@ -48,6 +51,14 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'keylight-test-win-'))
       assert.match(listing, /No errors detected/); n++
     } catch (e) { if (e.code !== 'ENOENT') throw e }
 
+    // ---- with no base folder, the zip holds what is in the folder at its top (as the
+    // Windows zip does: Extract All makes the folder)
+    const top = path.join(tmp, 'top.zip')
+    assert.equal(await writeZip(top, path.join(src, 'Pack')), 5); n++
+    assert.deepEqual(listZip(top).map((e) => e.name), ['readme.txt', 'sub/', 'sub/deeper/', 'sub/deeper/empty', 'sub/noise.bin']); n++
+    extractZip(top, path.join(tmp, 'top'))
+    assert.ok(fs.readFileSync(path.join(tmp, 'top/sub/noise.bin')).equals(noise)); n++
+
     // ---- a damaged entry is caught
     const bad = path.join(tmp, 'bad.zip')
     const buf = fs.readFileSync(zip)
@@ -84,6 +95,40 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'keylight-test-win-'))
     assert.match(txt, /Run anyway/); n++
     assert.doesNotMatch(txt, /<version>|xattr|^## /m); n++
     assert.doesNotMatch(txt, /[^\r]\n/); n++
+    // plain text for Notepad: no Markdown links, bold or code marks
+    assert.doesNotMatch(txt, /\]\(|\*\*|`/); n++
+    assert.match(txt, /Releases page: https:\/\/github\.com\/scizerss\/keylight-piano\/releases/); n++
+    assert.equal(plainText('Click **More info**, see [the issues](https://x.y/z) or [below](#here), run `a.exe`.'),
+      'Click More info, see the issues: https://x.y/z or below, run a.exe.'); n++
+    // the same text from a CRLF checkout of README.md
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').replace(/\r?\n/g, '\r\n')
+    assert.equal(windowsInstallText('9.8.7', readme), txt); n++
+
+    // ---- the icon: 32-bit bitmaps (height doubled for the AND mask) up to 64 px, PNG above
+    const ico = fs.readFileSync(path.join(__dirname, '..', 'assets/icon.ico'))
+    assert.equal(ico.readUInt16LE(2), 1); n++
+    const icons = Array.from({ length: ico.readUInt16LE(4) }, (_x, i) => {
+      const o = 6 + 16 * i, len = ico.readUInt32LE(o + 8), off = ico.readUInt32LE(o + 12)
+      return { size: ico[o] || 256, bits: ico.readUInt16LE(o + 6), data: ico.subarray(off, off + len) }
+    })
+    assert.deepEqual(icons.map((i) => i.size), SIZES); n++
+    for (const im of icons) {
+      assert.equal(im.bits, 32)
+      if (im.size <= BMP_UP_TO) {
+        const mask = Math.ceil(im.size / 32) * 4 * im.size
+        assert.deepEqual([im.data.readUInt32LE(0), im.data.readInt32LE(4), im.data.readInt32LE(8), im.data.readUInt16LE(14), im.data.length],
+          [40, im.size, im.size * 2, 32, 40 + im.size * im.size * 4 + mask], im.size + ' px bitmap')
+      } else {
+        const png = decodePng(im.data)
+        assert.deepEqual([png.width, png.height, png.rgba.length], [im.size, im.size, im.size * im.size * 4], im.size + ' px PNG')
+      }
+    }
+    n++
+    // a 2x2 image: rows bottom-up in BGRA, the transparent pixel set in the AND mask
+    const dib = dibFromRgba(2, 2, Buffer.from([255, 0, 0, 255, 0, 255, 0, 0, /* row 2 */ 0, 0, 255, 128, 1, 2, 3, 255]))
+    assert.equal(dib.length, 40 + 16 + 8); n++
+    assert.deepEqual([...dib.subarray(40, 56)], [255, 0, 0, 128, 3, 2, 1, 255, 0, 0, 255, 255, 0, 255, 0, 0]); n++
+    assert.deepEqual([...dib.subarray(56)], [0, 0, 0, 0, 0x40, 0, 0, 0]); n++
 
     console.log(`package-win: ${n} checks passed`)
   } finally { fs.rmSync(tmp, { recursive: true, force: true }) }

@@ -67,7 +67,15 @@ function serve() {
       fs.createReadStream(file).pipe(res)
     })
     const start = (port, canRetry) => {
-      server.once('error', () => { if (canRetry) start(0, false) })
+      server.once('error', (e) => {
+        const why = (e && (e.code || e.message)) || 'error'
+        if (!canRetry) { log(`[server] could not listen on 127.0.0.1:${port} (${why})`); return }
+        // e.g. on Windows the port is in a range Hyper-V, WSL or Docker reserved: any free
+        // port works, but the page's origin then differs, so its saved progress does not show
+        server.once('listening', () => log(`[server] port ${port} unavailable (${why}), using ${server.address().port}: ` +
+          'progress saved on this run will not carry over'))
+        start(0, false)
+      })
       server.listen(port, '127.0.0.1', () => resolve(server.address().port))
     }
     // Fixed port keeps the origin stable so localStorage progress persists.

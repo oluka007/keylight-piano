@@ -16,7 +16,7 @@ jobs:
       # profile until it reports (exit 0 only after SELFTEST done with no FAIL line)
       - run: node node_modules/electron/install.js
       - name: Self-test
-        run: node scripts/selftest.js --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
+        run: node scripts/selftest.js --expect-platform mac --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
         timeout-minutes: 10
       - name: Upload the self-test log
         if: always()
@@ -35,18 +35,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # with install scripts: electron's downloads the Windows binary for the self-test
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm test
+      # Electron for Windows x64, twice over: npm's electron for the self-test from source
+      # (electron_config_cache) and package-win.js's copy for Keylight.exe (KEYLIGHT_CACHE).
+      # Both are kept between runs, keyed on the package-lock that pins the version.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/keylight-cache
+          key: electron-win32-x64-${{ hashFiles('package-lock.json') }}
+      - run: node node_modules/electron/install.js
+        env:
+          electron_config_cache: ${{ runner.temp }}/electron-cache
+      # --expect-platform win: the page must say it took the Windows path (IS_WIN)
       - name: Self-test (from source)
         shell: bash
-        run: node scripts/selftest.js --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
+        run: node scripts/selftest.js --expect-platform win --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
         timeout-minutes: 10
       - name: Build the Windows zip
         run: npm run package:win -- --keep
+        env:
+          KEYLIGHT_CACHE: ${{ runner.temp }}/keylight-cache
       - name: Self-test (the packaged Keylight.exe)
         shell: bash
-        run: node scripts/selftest.js --exe dist/Keylight-*-win-x64/Keylight/Keylight.exe --profile "$RUNNER_TEMP/keylight-selftest-exe" --timeout 300
+        run: node scripts/selftest.js --expect-platform win --exe dist/Keylight-*-win-x64/Keylight/Keylight.exe --profile "$RUNNER_TEMP/keylight-selftest-exe" --timeout 300
         timeout-minutes: 10
       - name: Upload the self-test logs
         if: always()
