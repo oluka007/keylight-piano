@@ -40,8 +40,15 @@ The licence of every npm package in the vendor bundles is collected in
 `renderer/fonts/Outfit-latin.woff2`, Copyright 2021 The Outfit Project Authors.
 Licence text in `renderer/fonts/OFL.txt`.
 
+## Electron
+The app runs on [Electron](https://www.electronjs.org) (MIT), with Chromium and its
+components; their licences travel with the app as `electron-LICENSE` and
+`electron-LICENSES.chromium.html`. The Windows build's exe icon and version details are
+written with [resedit](https://github.com/jet2jet/resedit-js) (MIT), a build tool that
+is not bundled.
+
 ## blocksd
-The key lights are driven by [blocksd](https://github.com/hyperb1iss/blocksd) by
+The key lights on a Mac are driven by [blocksd](https://github.com/hyperb1iss/blocksd) by
 hyperb1iss, installed separately (not bundled). The LED command framing follows the
 public notes of the LUMI-lights project and the JUCE BLOCKS protocol definitions.
 

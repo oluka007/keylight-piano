@@ -3,9 +3,10 @@
 An open-source piano-learning app for the 24-key light-up keyboards ROLI made (Piano M
 and LUMI Keys), for people whose keyboard lost its app when ROLI Learn was discontinued.
 Falling notes in 3D over a keyboard that looks like yours, the real keys lighting up
-the next note, lessons, songs, games and a Playground, all running on your Mac with no
-account. Lighting goes through the open-source
-[blocksd](https://github.com/hyperb1iss/blocksd) daemon.
+the next note, lessons, songs, games and a Playground, all running on your Mac or
+Windows PC with no account. On a Mac the lighting goes through the open-source
+[blocksd](https://github.com/hyperb1iss/blocksd) daemon; on Windows the keys light up
+over plain MIDI (see [Install on Windows](#install-on-windows)).
 
 ![The player: falling notes over the keyboard, finger numbers for both hands](docs/images/player.png)
 
@@ -24,7 +25,7 @@ account. Lighting goes through the open-source
   numbers
 - 19 songs, 5 lessons (Watch, Practise, Play), Scales & Chords, a Playground with 19
   scales and live chord names, 4 arcade games, stars, streaks and achievements
-- Import your own MIDI, MusicXML or an audio file, which it turns into notes on your Mac
+- Import your own MIDI, MusicXML or an audio file, which it turns into notes on your computer
 - 8 instruments, sustain pedal, pitch bend and pressure
 - A hand-tracking beta: a camera over the keys shows which finger is over which key
 
@@ -34,15 +35,19 @@ account. Lighting goes through the open-source
 
 ## Requirements
 
-- A Mac with Apple Silicon (M1 or later) on macOS 13 or newer
+- A Mac with Apple Silicon (M1 or later) on macOS 13 or newer, or a 64-bit PC with
+  Windows 10 or 11
 - A ROLI Piano M or LUMI Keys over USB
-- [blocksd](https://github.com/hyperb1iss/blocksd) for the key lights (step 4 below)
+- On a Mac, [blocksd](https://github.com/hyperb1iss/blocksd) for the key lights (step 4
+  below). Windows needs nothing else: the keys light in the keyboard's own colours
+  there (see [Install on Windows](#install-on-windows))
 - To build from source: git and Node.js 22.12 or newer. Optional for the video tools
   in `scripts/`: ffmpeg, and Python 3 with numpy (and scipy for `measure-take-sync.py`)
 
 ## Install
 
-You need a Mac with Apple Silicon (M1 or later) on macOS 13 or newer, and the keyboard.
+On a Mac (for Windows, see [Install on Windows](#install-on-windows)). You need a Mac
+with Apple Silicon (M1 or later) on macOS 13 or newer, and the keyboard.
 
 1. Download `Keylight-<version>-mac.zip` from the
    [Releases page](https://github.com/scizerss/keylight-piano/releases) and double-click it. You get a
@@ -77,16 +82,53 @@ You need a Mac with Apple Silicon (M1 or later) on macOS 13 or newer, and the ke
   the app keeps your stars. If something goes wrong, attach `app.log` from there to
   your report.
 
+## Install on Windows
+
+You need a 64-bit PC with Windows 10 or 11, and the keyboard. Windows support is new
+and has not been tried with the keyboard on Windows yet: please say how it goes in an
+[issue](https://github.com/scizerss/keylight-piano/issues).
+
+1. Download `Keylight-<version>-win-x64.zip` from the
+   [Releases page](https://github.com/scizerss/keylight-piano/releases).
+2. Right-click the zip, choose **Extract All...** and extract it, for example into
+   Documents. You get a `Keylight-<version>-win-x64` folder with a `Keylight` folder
+   and a copy of these steps.
+3. Open the `Keylight` folder and double-click `Keylight.exe`. Keylight is not
+   code-signed, so the first time Windows may say "Windows protected your PC": click
+   **More info**, then **Run anyway**. (Right-click the zip, **Properties**, tick
+   **Unblock** and click **OK** before extracting it, and the warning does not appear.)
+   To find Keylight in the Start menu later, right-click `Keylight.exe` and choose
+   **Pin to Start**.
+4. Plug the keyboard in over USB, switch it on, and open Keylight. Close other apps that
+   use the keyboard first (ROLI Connect, a DAW): on most PCs only one app at a time can
+   use a MIDI keyboard.
+
+What is different on Windows:
+
+- blocksd, which drives the per-key colours on a Mac, runs on macOS and Linux only. On
+  Windows Keylight lights the keys with plain MIDI notes, in the keyboard's own
+  built-in colours: the note to play now, the next notes and the notes practice waits
+  for. Test lights and the setup run a light across the keys the same way.
+- Not on Windows for now: the four light styles and your own colour, the brightness
+  slider, the light show after a song, finding the keys with the camera, moving the
+  keys' octave from the app (use the octave buttons on the keyboard: Keylight follows
+  them), the battery level, and the keyboard's arrow and mode buttons.
+- Progress and the log live in `%APPDATA%\lumi-app\`; takes are saved to
+  **Videos > Keylight**.
+- Windows 11 with Smart App Control switched on may block unsigned apps like Keylight
+  without offering **Run anyway**.
+
 ## Build from source
 
-Needs an Apple Silicon Mac, git and Node.js 22.12 or newer.
+Needs git and Node.js 22.12 or newer, on an Apple Silicon Mac (the commands below) or
+on Windows (see below).
 
 ```sh
 git clone https://github.com/scizerss/keylight-piano.git keylight
 cd keylight
 npm ci
 env -u ELECTRON_RUN_AS_NODE npm start    # run from source
-npm test                                 # blocksd watchdog tests
+npm test                                 # unit tests (watchdog, takes, Windows build)
 scripts/package.sh                       # build Keylight.app
 ```
 
@@ -104,6 +146,27 @@ window) on the Desktop; `scripts/package.sh --zip-only` builds the zip without
 installing. The icon comes from `assets/icon.png` via `scripts/make-icon.sh`; without
 one a generated stand-in is used. Release checklist: `docs/RELEASING.md`.
 
+On Windows, in PowerShell or Command Prompt:
+
+```sh
+git clone https://github.com/scizerss/keylight-piano.git keylight
+cd keylight
+npm ci
+npm start                                # run from source
+npm test
+npm run package:win                      # build the Windows zip
+```
+
+`npm run package:win` (`scripts/package-win.js`) builds
+`dist/Keylight-<version>-win-x64.zip` and runs on Windows, macOS or Linux alike. It
+downloads Electron for Windows x64 once (cached), checks it against the checksum that
+npm's `electron` package ships, renames `electron.exe` to `Keylight.exe` with the icon
+from `assets/icon.ico` and Keylight's version details, turns off the same Electron fuses
+as the Mac build, and adds the app, the licences and a `README.txt` with the
+[Install on Windows](#install-on-windows) steps. `--keep` also leaves the unzipped
+folder in `dist/`. `assets/icon.ico` is made from `assets/icon.png` on a Mac by
+`node scripts/make-ico.js`.
+
 ### Test and screenshot flags
 
 Always give test runs their own profile with `LUMI_USERDATA`, so they don't write
@@ -118,8 +181,16 @@ LUMI_USERDATA=/tmp/keylight-test LUMI_SELFTEST=1 env -u ELECTRON_RUN_AS_NODE npm
   `~/Library/Application Support/lumi-app/app.log` for the real one). The window stays
   hidden and the app keeps running: press Ctrl-C after `SELFTEST done` (about a
   minute). Two checks go online (cover and lyrics lookup, the hand-tracking model).
+- `LUMI_SELFTEST_QUIT=1` makes the self-test quit when it is done: exit code 0 after
+  `SELFTEST done`, 1 when it failed or printed a `FAIL` line, 2 when it has not finished
+  after `LUMI_SELFTEST_TIMEOUT` seconds (300). `npm run selftest` runs it this way in a
+  throwaway profile, on macOS or Windows, and prints the `SELFTEST` lines; CI runs it
+  on both.
 - `LUMI_NO_KEYBOARD=1` keeps a test run off MIDI and the key lights, so it neither
-  hears the keyboard nor takes its lights from a Keylight you are playing in.
+  hears the keyboard nor takes its lights from a Keylight you are playing in. It does
+  not check on, start or restart blocksd either.
+- `LUMI_QUERY=platform=win` (or `platform=mac`) shows the other system's wording and
+  light handling, for checking the Windows page on a Mac.
 - `LUMI_QUERY=perf=1` prints `PERF …` lines: each instrument's onset and ring-down, and
   how long a key press can wait on the main thread while a song plays.
 - `LUMI_SHOT=/tmp/x.png` captures the window `LUMI_SHOT_DELAY` ms (default 3000) after
@@ -166,7 +237,7 @@ app's sound, use `scripts/record-clip.sh` (see Recording takes).
 
 Search → **Add a song**, or drop a file on the window:
 
-- **Recordings** (MP3, M4A, WAV, FLAC, AAC, OGG, AIFF) are turned into notes on this Mac
+- **Recordings** (MP3, M4A, WAV, FLAC, AAC, OGG, AIFF) are turned into notes on your computer
   by Spotify's open-source Basic Pitch model. *Simplify to melody + bass* keeps the top
   note and a bass line, which is far easier on 24 keys than every voice of a full mix.
   Works best on piano or solo-instrument recordings. The original recording plays along
@@ -194,8 +265,8 @@ light style's colour, the root brighter, and every key you press sends up a bubb
 
 ## Hand tracking (beta)
 
-Settings → Hand tracking: point a camera down at the keys (an iPhone in Desk View works
-best), press **Find the keys**, and numbered finger badges appear over the keys your
+Settings → Hand tracking: point a camera down at the keys (on a Mac, an iPhone in Desk
+View works best), press **Find the keys** (Mac only: it lights the keys one by one), and numbered finger badges appear over the keys your
 fingers are above. Details, hardware options and the roadmap: `docs/HAND-TRACKING.md`.
 
 ## Timing
@@ -251,6 +322,14 @@ watchdog in `main.js` asks it for its devices every 20 s. If blocksd has listed 
 device for a minute while macOS still shows the keyboard on USB (`ioreg -p IOUSB`), the
 keyboard has dropped off the daemon: the app restarts blocksd, at most once every
 3 minutes, and notes it in `app.log` (`[watchdog]` / `[daemon]` lines).
+
+On Windows blocksd does not run (it is built for macOS and Linux), and the app never
+starts it. Without the light service, on either system, the app sends the keyboard
+plain MIDI note-ons and its built-in program lights those keys from a fixed colour
+table (`renderer/app.js`, "Tier-B light fallback"): velocity 127 for the note sounding
+now, 20 for the next group, 110 for notes practice waits for. On Windows the setup's
+light check and Test lights sweep the keys the same way. A blocksd that is already
+running on port 9010 is still used, on Windows too.
 
 ## Sound
 
@@ -348,8 +427,8 @@ Reinstalling blocksd undoes the change; then quit and reopen Keylight.
 ## Files
 
 ```
-main.js                 Electron main: local server, MIDI permission, blocksd start + watchdog,
-                        screenshots and demo-video frames
+main.js                 Electron main: local server, MIDI permission, blocksd start + watchdog
+                        (macOS), the Windows window, screenshots and demo-video frames
 renderer/app.js         screens, wiring, render loop, lights, octave sync, results
 renderer/player.js      transport (modes, wait, loop, count-in, clocks)
 renderer/scheduler.js   audio-clock scheduling of song, accompaniment, band, clicks
@@ -359,19 +438,24 @@ renderer/songloader.js  MIDI/MusicXML → song model with hands + note groups
 renderer/audio.js       synth, clicks, backing-track player, the take recorder's sound tap
 renderer/recorder.js    take recorder: stage canvas + app sound → mp4 + JSON sidecar
 renderer/daemon.js      blocksd WebSocket client (24-key frames, config, brightness)
+renderer/platform.js    Mac or Windows: the words and light handling that differ
 renderer/theme.js       colour tokens
 renderer/fonts/         Outfit (SIL Open Font License, see OFL.txt)
 renderer/songs/         19 public-domain songs (MusicXML), arranged for this project
 scripts/package.sh      build, sign, install and zip Keylight.app
+scripts/package-win.js  build the Windows zip (Keylight.exe), on any system
 scripts/make-icon.sh    assets/icon.png → assets/icon.icns
+scripts/make-ico.js     assets/icon.png → assets/icon.ico (Windows), on a Mac
+scripts/selftest.js     runs the self-test in a throwaway profile and checks it (npm run selftest)
 scripts/record.sh       demo video (mp4 + gif) from LUMI_FRAMES
 scripts/record-clip.sh  demo clip with sound (60 fps mp4) from the take recorder
 scripts/measure-take-sync.py  sound/picture sync of a take or clip (numpy + scipy)
 scripts/test-watchdog.js  blocksd watchdog tests (npm test)
 scripts/test-take-download.js  which downloads main.js saves as takes (npm test)
+scripts/test-package-win.js  the Windows build's zip and fuse code (npm test)
 scripts/test-sync-take.py  synthetic end-to-end test of sync-take.py (needs ffmpeg)
 scripts/find-electron.sh  finds the Electron.app the scripts run
-scripts/flip-fuses.js   turns off Electron's RunAsNode and inspect fuses in the built app
+scripts/flip-fuses.js   turns off Electron's RunAsNode and inspect fuses in the built app or exe
 scripts/placeholder-icon.js  stand-in icon when assets/icon.png is missing
 scripts/build-vendor.sh rebuilds renderer/vendor/ and the Basic Pitch model
 scripts/vendor-licenses.sh  collects the bundled npm packages' licences
@@ -388,9 +472,10 @@ LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bu
 
 Bug reports, ideas and pull requests are welcome: open an
 [issue](https://github.com/scizerss/keylight-piano/issues). If something goes wrong,
-attach `~/Library/Application Support/lumi-app/app.log`. Before a pull request, run
-`npm test`, and run the self-test (`LUMI_SELFTEST=1`, see Test and screenshot flags);
-it should end with `SELFTEST done`.
+attach `~/Library/Application Support/lumi-app/app.log` (on Windows
+`%APPDATA%\lumi-app\app.log`). Before a pull request, run `npm test`, and run the
+self-test (`npm run selftest`, see Test and screenshot flags); it should end with
+`SELFTEST done`.
 
 ## License
 

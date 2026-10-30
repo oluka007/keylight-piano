@@ -1,4 +1,5 @@
 import { COLORS, FONTS, MODES, NOTE_VIEWS, NOTE_LABELS } from './theme.js'
+import { IS_WIN, THIS_COMPUTER, TAKES_FOLDER } from './platform.js'
 import { Player } from './player.js'
 import { drawScene, noteName } from './views.js'
 import { loadSongFile } from './songloader.js'
@@ -146,6 +147,7 @@ function gameBest(id) { return store.get('lumi.game.' + id, 0) }
 /* ============================== boot ============================== */
 function boot() {
   const q = new URLSearchParams(location.search)
+  if (IS_WIN) applyWindowsPage()
   wireUI()
   const ob = $('onboarding')
   const skipOb = q.has('demo') || q.has('screen') || q.has('tb') || q.has('importdemo') || q.has('freeplay') || q.has('selftest') || q.has('perf')
@@ -301,7 +303,9 @@ function setupPoll() {
 
 // The light style's own sweep (drawStylePreview) runs along the keys, and along the drawn ones
 function sweepSetupLights() {
-  if (setupLightsState() !== 'on') return
+  const lights = setupLightsState()
+  if (lights !== 'on' && lights !== 'midi') return
+  if (lights === 'midi') midiLightSweep()
   setup.sweepAt = performance.now()
   stylePreviewAt = setup.sweepAt
   const keys = $('obKeys')
@@ -312,6 +316,9 @@ function sweepSetupLights() {
 
 function setupLightsState() {
   if (daemon && daemon.ready) return 'on'
+  // Windows has no light service: the keyboard lights keys from MIDI notes ('midi'), once
+  // its MIDI output is found ('no-output' until then; 'checking' while MIDI starts)
+  if (IS_WIN) return midiOutput ? 'midi' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'no-output'
   return daemonState === 'no-device' ? 'no-device' : daemonState === 'checking' ? 'checking' : 'off'
 }
 
@@ -384,6 +391,7 @@ function renderSetup() {
   // A port that was unplugged stays picked but reads 'disconnected'.
   const kb = midiInput && midiInput.state !== 'disconnected' ? 'on' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'off'
   const lights = setupLightsState()
+  const canLight = lights === 'on' || lights === 'midi'
   const noKeyboard = kb === 'checking' ? ['wait', 'Looking for your keyboard…'] : ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
   const lit = lights === 'on' ? ' (it’s lit)' : ''
   let v
@@ -407,17 +415,19 @@ function renderSetup() {
     }
   } else if (step === 'lights') {
     v = {
-      title: lights === 'on' ? 'Watch your keys' : 'Light up your keys',
-      copy: lights === 'on' ? 'A light runs along your keys from left to right.'
+      title: canLight ? 'Watch your keys' : 'Light up your keys',
+      copy: canLight ? 'A light runs along your keys from left to right.'
+        : IS_WIN ? 'Your keys light up to show you what to play next, in your keyboard’s own colours.'
         : 'Your keys light up to show you what to play next. A free helper, blocksd, drives the lights.',
-      check: lights === 'on'
+      check: canLight
         ? (setup.lights === 'yes' ? ['ok', 'Your keys light up']
           : setup.lights === 'no' ? ['warn', 'Check the keyboard is switched on and plugged in over USB, then show the lights again.']
           : ['wait', 'Did your keys light up?'])
         : lights === 'no-device' ? ['warn', 'The light service is running but can’t find your keyboard. Plug it in over USB and switch it on.']
-        : lights === 'checking' ? ['wait', 'Looking for the light service…']
+        : lights === 'checking' ? ['wait', IS_WIN ? 'Looking for your keyboard…' : 'Looking for the light service…']
+        : lights === 'no-output' ? ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
         : ['warn', 'The light service isn’t running, so your keys can’t light up yet.'],
-      skip: lights === 'on' && setup.lights == null ? 'Skip' : 'Continue without key lights'
+      skip: canLight && setup.lights == null ? 'Skip' : 'Continue without key lights'
     }
   } else {
     const all = SETUP_STEPS.slice(0, 3).every(setupPassed)
@@ -436,7 +446,7 @@ function renderSetup() {
     if (chk.dataset.state !== v.check[0]) chk.dataset.state = v.check[0]
     setText($('obCheckText'), v.check[1])
   }
-  $('obAnswer').classList.toggle('hidden', !(step === 'lights' && lights === 'on' && setup.lights == null))
+  $('obAnswer').classList.toggle('hidden', !(step === 'lights' && canLight && setup.lights == null))
   for (const p of ob.querySelectorAll('.ob-panel')) p.classList.toggle('hidden', p.dataset.panel !== step)
   // Bluetooth headphones are the usual cause of a long output delay
   const ac = audioContext()
@@ -444,7 +454,7 @@ function renderSetup() {
   $('obLatency').classList.toggle('hidden', !(out > 0.05))
   if (out > 0.05) setText($('obLatency'), 'Your speakers or headphones add about ' + Math.round(out * 1000) + ' ms of delay; wired headphones keep you in time. Bluetooth is the usual cause.')
   $('obInstall').classList.toggle('hidden', lights !== 'off')
-  $('obLightsAgain').classList.toggle('hidden', !(lights === 'on' && setup.lights === 'no'))
+  $('obLightsAgain').classList.toggle('hidden', !(canLight && setup.lights === 'no'))
   if (step === 'ready') renderSetupSummary(lights)
   ob.querySelectorAll('#obSteps li').forEach((li, i) => {
     const done = setupPassed(SETUP_STEPS[i]) && i !== setup.step
@@ -473,6 +483,7 @@ function renderSetupSummary(lights) {
     ['Keyboard', setup.rangeDone, setup.rangeDone ? 'Your keys play ' + keysRange() : 'Skipped: Keylight also learns your keys as you play'],
     ['Lights', setup.lights === 'yes', setup.lights === 'yes' ? 'Your keys light up'
       : lights === 'off' ? 'Off for now: the light service isn’t running'
+      : lights === 'no-output' ? 'Off for now: no keyboard found'
       : setup.lights === 'no' ? 'Not seen yet: run the setup again from Settings' : 'Skipped']
   ]
   const html = rows.map(([name, ok, text]) => `<li data-state="${ok ? 'ok' : 'skip'}"><span class="ob-mark">${SETUP_CHECK}</span><b>${name}</b><span>${text}</span></li>`).join('')
@@ -685,7 +696,7 @@ function wireUI() {
     settings.recordTakes = e.target.checked
     saveSettings()
     if (!settings.recordTakes) endTake('switched off')
-    status(settings.recordTakes ? 'Each run in the player is recorded to Movies › Keylight' : 'Takes are no longer recorded')
+    status(settings.recordTakes ? 'Each run in the player is recorded to ' + TAKES_FOLDER : 'Takes are no longer recorded')
   }
   $('recPill').onclick = () => { takeDeclined = freeplay ? 'playground' : player; endTake('REC button') }
   onTakeChange(syncRecPill)
@@ -728,7 +739,7 @@ function wireUI() {
   // so favourites, added songs and anything else stored stay.
   const PROGRESS_KEY = /^lumi\.(best|game|lesson|lessonwatched|lessonpractised|exercise|days|streak|recent)(\.|$)/
   $('resetProgress').onclick = () => {
-    if (!confirm('Reset your progress on this Mac?\n\nThis erases your stars and best scores, lessons, games, Scales & chords, minutes played, your streak and recently played songs. Your settings, favourites and added songs are kept.')) return
+    if (!confirm('Reset your progress on ' + THIS_COMPUTER + '?\n\nThis erases your stars and best scores, lessons, games, Scales & chords, minutes played, your streak and recently played songs. Your settings, favourites and added songs are kept.')) return
     for (const k of Object.keys(localStorage)) if (PROGRESS_KEY.test(k)) localStorage.removeItem(k)
     location.reload()
   }
@@ -810,7 +821,7 @@ function wireUI() {
 /* ============================== screens ============================== */
 // Search has no title: its "Search here" pill sits in the middle of the top bar instead
 const SCREEN_TITLES = {
-  home: ['', ''], search: ['', ''], achievements: ['Achievements', 'Your progress on this Mac'],
+  home: ['', ''], search: ['', ''], achievements: ['Achievements', 'Your progress on ' + THIS_COMPUTER],
   toolbox: ['Scales & chords', 'Pick a key, then practise it'], games: ['Games', 'Hit the notes in time, beat the pass mark'],
   settings: ['Settings', 'Lights, sound and practice']
 }
@@ -1594,6 +1605,7 @@ function lightTestFrames(base = kbBase()) {
 // The test owns the keys like a ceremony does, so the frame loop waits, then puts the
 // current picture back. A key still marked as held (its note-off got lost) is let go too.
 function runLightTest() {
+  if (IS_WIN && !(daemon && daemon.ready)) { runMidiLightTest(); return }
   if (!daemon || !daemon.ready) {
     // without the light service the keyboard lights keys from MIDI notes: switch those off
     if (midiOutput) { clearLights(midiOutput); litNotes.clear() }
@@ -1625,6 +1637,7 @@ function runLightTest() {
 }
 async function autoCalibrate() {
   if (!cameraOn()) { status('Start the camera first'); return }
+  if (IS_WIN && !(daemon && daemon.ready)) { status('Finding the keys needs colour key lights, which Windows does not have yet: use Click the end keys'); return }
   if (!daemon || !daemon.ready) { status('The keyboard lights are needed to find the keys'); return }
   cancelCeremony()
   ledOverrideUntil = performance.now() + 4000
@@ -2037,6 +2050,46 @@ function clearNoteLights() {
   for (const pitch of [...litNotes.keys()]) { try { midiOutput.send([0x80, pitch, 0]) } catch (_e) {} }
   litNotes.clear()
 }
+// Windows: the setup's light check and Test lights run a light along the 24 keys with
+// note-ons (each key stays lit for three steps), in under the setup's 1.6 s between
+// sweeps. The notes bypass litNotes, so the frame loop's updateNoteLights leaves them
+// alone; a sweep that starts over first lets go of the keys the last one still holds.
+// Returns how long the sweep takes (ms). port: the keyboard's output (the self-test's stand-in).
+const MIDI_SWEEP_STEP_MS = 55
+let midiSweepTimers = []
+const midiSweepLit = new Map()   // pitch -> the port it was lit on
+function midiLightSweep(port = midiOutput) {
+  for (const t of midiSweepTimers) clearTimeout(t)
+  midiSweepTimers = []
+  const send = (to, msg) => { try { to.send(msg) } catch (_e) {} }
+  for (const [pitch, litOn] of midiSweepLit) send(litOn, [0x80, pitch, 0])
+  midiSweepLit.clear()
+  if (!port) return 0
+  const base = kbBase()
+  for (let i = 0; i < 24; i++) {
+    const pitch = base + i
+    if (pitch < 0 || pitch > 127) continue
+    midiSweepTimers.push(setTimeout(() => { send(port, [0x90, pitch, 127]); midiSweepLit.set(pitch, port) }, i * MIDI_SWEEP_STEP_MS))
+    midiSweepTimers.push(setTimeout(() => { send(port, [0x80, pitch, 0]); midiSweepLit.delete(pitch) }, (i + 3) * MIDI_SWEEP_STEP_MS))
+  }
+  return (24 + 3) * MIDI_SWEEP_STEP_MS
+}
+function runMidiLightTest() {
+  if (!midiOutput) { status('No keyboard found: plug it in over USB and switch it on'); return }
+  clearLights(midiOutput)
+  litNotes.clear()
+  const ms = midiLightSweep()
+  const btn = $('testLights')
+  btn.disabled = true
+  btn.textContent = 'Testing…'
+  setTimeout(() => {
+    if (midiOutput) { clearLights(midiOutput); litNotes.clear() }
+    btn.disabled = false
+    btn.textContent = 'Test lights'
+    status('Light test done: every key should have lit up, and stuck lights are cleared')
+  }, ms + 150)
+  status('Testing the lights: a light runs across every key')
+}
 
 /* ============================== backing track sync ============================== */
 function syncBacking() {
@@ -2281,7 +2334,7 @@ function takeMeta(trigger) {
 }
 
 function beginTake(trigger) {
-  const onStop = (r) => { if (r.saved && r.sidecar.stopReason === 'time limit') status('Takes stop after 15 minutes: this one is saved in Movies › Keylight') }
+  const onStop = (r) => { if (r.saved && r.sidecar.stopReason === 'time limit') status('Takes stop after 15 minutes: this one is saved in ' + TAKES_FOLDER) }
   const run = freeplay ? 'playground' : player
   const stem = startTake({ canvas, meta: takeMeta(trigger), save: takeSave, onStop })
   if (stem) takeRun = run
@@ -2294,7 +2347,7 @@ function beginTake(trigger) {
 function endTake(reason) {
   if (!isRecording()) return
   stopTake(reason).then((r) => {
-    if (r && r.blob && r.blob.size) status('Take saved to Movies › Keylight')
+    if (r && r.blob && r.blob.size) status('Take saved to ' + TAKES_FOLDER)
     maybeStartTake()
   })
 }
@@ -2712,8 +2765,9 @@ function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('o
 // Piano M may show up), else an input that looks like a keyboard: a hardware port,
 // never a software bus (IAC, a network session, a DAW's virtual port), which would
 // feed the app another program's notes. Lights only go to an output named for the
-// keyboard, since any other output would play the light notes as music.
-const KB_PORT = /lumi/i, KB_MAKER = /roli/i
+// keyboard, since any other output would play the light notes as music. A Piano M may
+// name its ports "LUMI Keys BLOCK", "ROLI Piano M" or just "Piano M".
+const KB_PORT = /lumi|\bpiano m\b/i, KB_MAKER = /roli/i
 const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|loopback|loopmidi|through|\bthru\b|rtp/i
 function pickPorts(ins, outs) {
   const label = (p) => (p.name || '') + ' ' + (p.manufacturer || '')
@@ -2764,7 +2818,33 @@ function updateKbChip() {
   if (!chip) return
   const connected = !!midiInput
   chip.classList.toggle('on', connected)
-  $('kbStatusText').textContent = connected ? (daemon && daemon.ready ? 'Keyboard connected' : 'Keyboard · lights off') : 'No keyboard'
+  const lit = (daemon && daemon.ready) || (IS_WIN && !!midiOutput)
+  $('kbStatusText').textContent = connected ? (lit ? 'Keyboard connected' : 'Keyboard · lights off') : 'No keyboard'
+  if (IS_WIN) showWindowsLights()
+}
+
+// Windows: Settings → Keyboard lights says how the keys light (there is no light service
+// to report on), and the brightness works only with a blocksd someone runs themselves.
+function showWindowsLights() {
+  const ready = !!(daemon && daemon.ready)
+  const el = $('daemonState')
+  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midi ? 'No keyboard found' : 'checking…'
+  const b = $('brightness')
+  if (b) {
+    b.disabled = !ready
+    b.title = ready ? '' : 'The keyboard sets its own brightness on Windows'
+  }
+}
+
+// Windows wording on the page (index.html is written for the Mac)
+function applyWindowsPage() {
+  document.documentElement.classList.add('win')
+  const set = (id, text) => { const el = $(id); if (el) el.textContent = text }
+  set('lightsLabel', 'Key lights')
+  set('recordTakesNote', 'Saves each run in the player as a video with Keylight’s sound to ' + TAKES_FOLDER + ', for making videos.')
+  set('importPrivacy', 'A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on ' + THIS_COMPUTER + '.')
+  set('camHelp', 'Point a camera down at the keyboard. Keylight then shows which finger is over which key, before you press it.')
+  showWindowsLights()
 }
 
 /* ============================== keyboard octave ============================== */
@@ -2793,7 +2873,11 @@ function setKeyboardWindow(start) {
 // sweep that travels the way they moved.
 function shiftOctave(delta) {
   // without the light service the app can't move the keyboard's octave, only follow it
-  if (!daemon || !daemon.ready) { status('Moving the keys from here needs the light service: use the octave buttons on your keyboard'); return }
+  if (!daemon || !daemon.ready) {
+    status(IS_WIN ? 'Use the octave buttons on your keyboard to move the keys: Keylight follows them'
+      : 'Moving the keys from here needs the light service: use the octave buttons on your keyboard')
+    return
+  }
   const from = kbBase()
   setKeyboardWindow(from + 12 * delta)
   if (kbBase() === from) { status('The keys are already at their ' + (delta < 0 ? 'lowest' : 'highest') + ' octave'); return }
@@ -3599,6 +3683,20 @@ async function runSelfTest() {
     console.log('SELFTEST noteLight fallback lit=' + litNotes.size + ' (was ' + before + ')')
     clearNoteLights()
     console.log('SELFTEST noteLight cleared=' + litNotes.size)
+    // the Windows light sweep on a stand-in port: every key on, then off, and a sweep that
+    // starts over lets go of the keys the first one still held
+    {
+      const sent = []
+      const port = { send: (m) => sent.push(m) }
+      midiLightSweep(port)
+      await new Promise((r) => setTimeout(r, 200))
+      const ms = midiLightSweep(port)
+      await new Promise((r) => setTimeout(r, ms + 100))
+      const count = new Map()
+      for (const [st, p] of sent) count.set(p, (count.get(p) || 0) + (st === 0x90 ? 1 : -1))
+      const ons = sent.filter((m) => m[0] === 0x90)
+      console.log(`SELFTEST windows light sweep keys=${new Set(ons.map((m) => m[1])).size} ons=${ons.length} stuck=${[...count.values()].filter((c) => c !== 0).length} ms=${ms} (expect 24, over 24, 0, under 1600)`)
+    }
 
     // K) game: passing run stores stars
     const g = GAMES[0]
@@ -3804,6 +3902,9 @@ async function runSelfTest() {
       const pd = pickPorts([port('LUMI Keys BLOCK', { state: 'disconnected' }), port('Digital Piano')], [port('LUMI Keys BLOCK', { state: 'disconnected' }), port('Digital Piano')])
       const nm = (p) => (p ? p.name : 'none')
       console.log(`SELFTEST engine ports lumi=${nm(pa.input)}/${nm(pa.output)} busOnly=${nm(pb.input)}/${nm(pb.output)} lumiGone=${nm(pd.input)}/${nm(pd.output)} live=${midiInput ? midiInput.name : 'none'} (expect LUMI Keys BLOCK/LUMI Keys BLOCK, none/none, Digital Piano/none)`)
+      const pm = pickPorts([port('Piano M')], [port('Piano M')])
+      const pr = pickPorts([port('ROLI Piano M')], [port('ROLI Piano M')])
+      console.log(`SELFTEST engine ports pianoM=${nm(pm.input)}/${nm(pm.output)} roliPianoM=${nm(pr.input)}/${nm(pr.output)} (expect Piano M/Piano M, ROLI Piano M/ROLI Piano M)`)
 
       // the practice ticker, on the right-hand-only song: waiting counts only with a key
       // in the last 20 s; a running clock always counts

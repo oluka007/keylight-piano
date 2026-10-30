@@ -3,11 +3,66 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # --ignore-scripts: the tests don't need the Electron binary
+      # --ignore-scripts: the unit tests don't need the Electron binary
       - run: npm ci --ignore-scripts
       - run: npm test
+      # the engine self-test does: fetch it, then run the app hidden in a throwaway
+      # profile until it reports (exit 0 only after SELFTEST done with no FAIL line)
+      - run: node node_modules/electron/install.js
+      - name: Self-test
+        run: node scripts/selftest.js --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
+        timeout-minutes: 10
+      - name: Upload the self-test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-macos
+          path: ${{ runner.temp }}/keylight-selftest/app.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # with install scripts: electron's downloads the Windows binary for the self-test
+      - run: npm ci
+      - run: npm test
+      - name: Self-test (from source)
+        shell: bash
+        run: node scripts/selftest.js --profile "$RUNNER_TEMP/keylight-selftest" --timeout 300
+        timeout-minutes: 10
+      - name: Build the Windows zip
+        run: npm run package:win -- --keep
+      - name: Self-test (the packaged Keylight.exe)
+        shell: bash
+        run: node scripts/selftest.js --exe dist/Keylight-*-win-x64/Keylight/Keylight.exe --profile "$RUNNER_TEMP/keylight-selftest-exe" --timeout 300
+        timeout-minutes: 10
+      - name: Upload the self-test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-windows
+          path: |
+            ${{ runner.temp }}/keylight-selftest/app.log
+            ${{ runner.temp }}/keylight-selftest-exe/app.log
+          if-no-files-found: ignore
+          retention-days: 14
+      # a test build to try on a Windows PC (the release zip is attached to a release by hand)
+      - name: Upload the Windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: keylight-win-x64
+          path: dist/Keylight-*-win-x64.zip
+          compression-level: 0
+          retention-days: 7

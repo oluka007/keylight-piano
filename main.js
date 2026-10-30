@@ -8,9 +8,12 @@ const { setTimeout: sleep } = require('node:timers/promises')
 
 // Under plain Node (scripts/test-watchdog.js) this file only lends out the blocksd
 // watchdog for testing: Electron, and with it the app, loads only under Electron.
-const { app, BrowserWindow, session } = process.versions.electron ? require('electron') : {}
+const { app, BrowserWindow, session, nativeTheme, screen } = process.versions.electron ? require('electron') : {}
 
 const ROOT = path.join(__dirname, 'renderer')
+// Keylight runs on macOS and Windows. The few things that differ (blocksd, the window
+// frame) check this; everything else is the same code on both.
+const IS_WIN = process.platform === 'win32'
 
 // App file log — needed because a Finder-launched app has nowhere to print.
 // It lives in the profile folder (test profiles keep their own). Past 5 MB it
@@ -77,8 +80,10 @@ function serve() {
 // The keyboard's per-key lighting is driven by the blocksd daemon. The app starts
 // it when it is not running, so it works after a reboot without manual steps, and
 // a watchdog brings the keyboard back when it drops off a running daemon.
+// blocksd runs on macOS and Linux only, so on Windows none of this runs (openWindow):
+// the keys light from plain MIDI notes there (renderer/app.js, "Tier-B light fallback").
 
-const BLOCKSD = path.join(os.homedir(), '.local/bin/blocksd')
+const BLOCKSD = path.join(os.homedir(), '.local/bin/blocksd' + (IS_WIN ? '.exe' : ''))
 const LED_PORT = 9010
 const LED_WS_URL = `ws://127.0.0.1:${LED_PORT}/ws`
 
@@ -224,7 +229,7 @@ function startBlocksd(reason) {
     return
   }
   try {
-    const child = spawn(BLOCKSD, ['run'], { detached: true, stdio: 'ignore' })
+    const child = spawn(BLOCKSD, ['run'], { detached: true, stdio: 'ignore', windowsHide: true })
     child.once('error', (e) => log('[daemon] failed to start blocksd: ' + e.message))
     child.unref()
     log('[daemon] started blocksd (' + reason + ')')
@@ -501,10 +506,11 @@ function numberEnv(name, fallback, min, max) {
 // ---- app ------------------------------------------------------------------------
 
 function startApp() {
-  // Progress lives in ~/Library/Application Support/lumi-app, the folder the app has
-  // always used, whatever the product or bundle is called, so it survives renames and
-  // rebuilt bundles. LUMI_USERDATA gives screenshot/test runs their own profile (and
-  // their own single-instance lock) so they can run beside the real app.
+  // Progress lives in ~/Library/Application Support/lumi-app (%APPDATA%\lumi-app on
+  // Windows), the folder the app has always used, whatever the product or bundle is
+  // called, so it survives renames and rebuilt bundles. LUMI_USERDATA gives
+  // screenshot/test runs their own profile (and their own single-instance lock) so
+  // they can run beside the real app.
   let profileError = null
   try { app.setPath('userData', process.env.LUMI_USERDATA || path.join(app.getPath('appData'), 'lumi-app')) } catch (e) { profileError = e }
   openLog(app.getPath('userData'))
@@ -518,13 +524,51 @@ function startApp() {
   if (!app.requestSingleInstanceLock()) { app.quit(); return }
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
-    if (win) { if (win.isMinimized()) win.restore(); win.focus() }
+    if (win) { if (win.isMinimized()) win.restore(); if (IS_WIN) win.show(); win.focus() }
   })
   app.whenReady().then(openWindow)
 }
 
+// Windows: Electron's default menu bar (File, Edit, View…) hides until Alt is pressed,
+// the title bar is dark like the page, and the window fits a small screen (1280x820 is
+// taller than a 1080p screen at 150% scaling). Test runs keep off the taskbar.
+function windowsWindowOptions(quiet) {
+  nativeTheme.themeSource = 'dark'
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  return { width: Math.min(1280, width), height: Math.min(820, height), autoHideMenuBar: true, skipTaskbar: quiet }
+}
+
+// LUMI_SELFTEST_QUIT=1 (scripts/selftest.js, CI): the self-test leaves the app running,
+// so quit when it reports: exit code 0 after SELFTEST done, 1 when it threw (SELFTEST
+// FAIL …) or any check printed a FAIL line, and 2 when it has not finished after
+// LUMI_SELFTEST_TIMEOUT seconds (default 300).
+function watchSelfTest() {
+  if (process.env.LUMI_SELFTEST_QUIT !== '1') return () => {}
+  let failed = 0
+  let quitting = false
+  const quit = (code, why) => {
+    if (quitting) return
+    quitting = true
+    log('[selftest] ' + why + ': quitting with exit code ' + code + ' (LUMI_SELFTEST_QUIT)')
+    setTimeout(() => app.exit(code), 300)
+  }
+  const limit = numberEnv('LUMI_SELFTEST_TIMEOUT', 300, 10, 3600)
+  setTimeout(() => quit(2, 'no SELFTEST done after ' + limit + ' s'), limit * 1000).unref()
+  return (text) => {
+    if (!/^SELFTEST /.test(text)) return
+    if (/\bFAIL\b/.test(text)) failed++
+    if (text.startsWith('SELFTEST FAIL')) quit(1, 'the self-test failed')
+    else if (text === 'SELFTEST done') quit(failed ? 1 : 0, failed ? 'done, with ' + failed + ' FAIL line' + (failed === 1 ? '' : 's') : 'done')
+  }
+}
+
 async function openWindow() {
-  startLedWatchdog()
+  // blocksd runs on macOS and Linux only: on Windows it is never started or restarted, and
+  // the keys light over MIDI. The page still uses a blocksd that is already running on
+  // port 9010. LUMI_NO_KEYBOARD runs (tests, clips) keep off the keyboard and blocksd.
+  if (IS_WIN) log('[daemon] Windows: blocksd is not started (it runs on macOS and Linux); the keys light over MIDI')
+  else if (process.env.LUMI_NO_KEYBOARD === '1') log('[daemon] LUMI_NO_KEYBOARD: not checking blocksd')
+  else startLedWatchdog()
   const port = await serve()
   // Web MIDI + SysEx, the camera (hand tracking) and the rest are granted to this app's
   // own page only, never to another origin
@@ -541,6 +585,7 @@ async function openWindow() {
     width: 1280, height: 820, backgroundColor: '#151245',
     title: 'Keylight',
     show: !QUIET,
+    ...(IS_WIN ? windowsWindowOptions(QUIET) : {}),
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
   })
   saveTakeOnClose(win, takes)
@@ -570,7 +615,12 @@ async function openWindow() {
     })
   }
   // Electron 35+ puts the text on the event; older ones passed it as an argument
-  win.webContents.on('console-message', (e, _level, message) => log('[renderer] ' + (e && e.message !== undefined ? e.message : message)))
+  const selfTest = watchSelfTest()
+  win.webContents.on('console-message', (e, _level, message) => {
+    const text = e && e.message !== undefined ? e.message : message
+    log('[renderer] ' + text)
+    selfTest(String(text))
+  })
 }
 
 module.exports = { WATCHDOG, createLedWatchdog, countDiscoveredDevices, keyboardOnUsb, discoverLedDevices, portOpen, isTakeDownload }

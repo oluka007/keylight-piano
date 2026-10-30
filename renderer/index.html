@@ -244,7 +244,7 @@
           </label>
           <label class="setting" id="userColorRow">Your colour <input id="userColor" type="color" value="#a78bfa"></label>
           <label class="setting">Pitch bend &amp; pressure <input id="exprToggle" type="checkbox"></label>
-          <div class="setting-row"><span>Light service</span><span id="daemonState">checking…</span></div>
+          <div class="setting-row"><span id="lightsLabel">Light service</span><span id="daemonState">checking…</span></div>
           <div class="setting-row hidden" id="batteryRow"><span>Keyboard battery</span><span id="kbBattery"></span></div>
           <div class="setting-row"><span>Keys play</span><span>
             <button class="oct-mini" id="setOctDown" title="Octave down" aria-label="Octave down"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
@@ -267,7 +267,7 @@
             <label class="mini-btn">Attach<input id="backingFile" type="file" accept="audio/*" hidden></label></span></div>
           <div class="setting-row"><span>Full mix (Watch)</span><span><span id="fullState">none</span>
             <label class="mini-btn">Attach<input id="fullMixFile" type="file" accept="audio/*" hidden></label></span></div>
-          <label class="setting"><span class="setting-text">Record my takes<small>Saves each run in the player as a video with Keylight’s sound to Movies › Keylight, for making videos.</small></span>
+          <label class="setting"><span class="setting-text">Record my takes<small id="recordTakesNote">Saves each run in the player as a video with Keylight’s sound to Movies › Keylight, for making videos.</small></span>
             <input id="recordTakes" type="checkbox"></label>
         </div>
         <div class="settings-card">
@@ -292,7 +292,7 @@
         </div>
         <div class="settings-card cam-card">
           <h3>Hand tracking <span class="beta">beta</span></h3>
-          <p class="cam-help">Point a camera down at the keyboard (an iPhone in Desk View works well). Keylight then shows which finger is over which key, before you press it.</p>
+          <p class="cam-help" id="camHelp">Point a camera down at the keyboard (an iPhone in Desk View works well). Keylight then shows which finger is over which key, before you press it.</p>
           <label class="setting">Camera <select id="camSelect"><option value="">Default camera</option></select></label>
           <label class="setting">Mirror the picture <input type="checkbox" id="camMirror"></label>
           <div class="cam-preview"><canvas id="camSetupCanvas"></canvas><div class="cam-empty" id="camEmpty">Camera off</div></div>
@@ -380,7 +380,7 @@
   <div class="sheet">
     <button class="iconbtn sheet-close" id="importClose" title="Close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
     <h2>Add a song</h2>
-    <p class="sheet-sub">A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on this Mac.</p>
+    <p class="sheet-sub" id="importPrivacy">A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on this Mac.</p>
     <label class="dropzone" id="dropZone">
       <input id="importFile" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.aif,.aiff,.mid,.midi,.xml,.musicxml,.mxl" hidden>
       <div class="dz-icon"><svg><use href="#i-plus"/></svg></div>
