@@ -14,6 +14,15 @@ over plain MIDI (see [Install on Windows](#install-on-windows)).
 
 ![The player: falling notes over the keyboard, finger numbers for both hands](docs/images/player.png)
 
+## See it in action
+
+| Drop in an MP3: notes, cover and synced lyrics | Four note views |
+|---|---|
+| [![Importing an MP3 and playing it with synced lyrics](docs/images/mp3.gif)](https://github.com/scizerss/keylight-piano/releases/download/v0.2.1/keylight-tour.mp4) | [![Switching between the four note views](docs/images/views.gif)](https://github.com/scizerss/keylight-piano/releases/download/v0.2.1/keylight-tour.mp4) |
+
+Full videos with sound: [app tour (65 s)](https://github.com/scizerss/keylight-piano/releases/download/v0.2.1/keylight-tour.mp4) ·
+[teaser with the real keyboard (31 s)](https://github.com/scizerss/keylight-piano/releases/download/v0.2.1/keylight-teaser.mp4)
+
 > Keylight is an independent, unofficial project. It is not affiliated with, endorsed
 > by or supported by ROLI. ROLI, LUMI, Piano M and ROLI Learn are trademarks of their
 > respective owners, used here only to say which keyboards Keylight works with.
@@ -38,9 +47,25 @@ over plain MIDI (see [Install on Windows](#install-on-windows)).
   strings, press into a key to swell it and wiggle it for vibrato
 - A hand-tracking beta: a camera over the keys shows which finger is over which key
 
+| Add a song | Lyrics while you play |
+|---|---|
+| ![The Add a song sheet: cover found, synced lyrics, 60 notes](docs/images/mp3-import.jpg) | ![The player with synced lyrics scrolling above the notes](docs/images/mp3-lyrics.jpg) |
+
+| Home | Lessons |
+|---|---|
+| ![Home with the learning path](docs/images/home.jpg) | ![Five guided lessons](docs/images/lessons.jpg) |
+
 | Song library | Playground |
 |---|---|
 | ![Song library](docs/images/library.png) | ![Playground with chord names](docs/images/playground.png) |
+
+| Rainbow view | Classic view |
+|---|---|
+| ![Rainbow view: a colour per note](docs/images/rainbow.jpg) | ![Classic view: flat lanes](docs/images/classic.jpg) |
+
+| Scales & Chords | Settings |
+|---|---|
+| ![Scales and chords in any key](docs/images/toolbox.jpg) | ![Settings: lights, sound and practice](docs/images/settings.jpg) |
 
 ## Requirements
 

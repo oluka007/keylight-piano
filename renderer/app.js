@@ -156,6 +156,10 @@ function boot() {
   else if (ob && !store.get('lumi.onboarded', false) && !skipOb) openSetup(1)
   // open the audio output now, so the first key you press doesn't wait for it
   initAudio()
+  // instrument=<id> plays this run on that instrument (demo clips; the setting is left as it
+  // is); exprdemo=1 needs one that answers pressure and bend, so it brings the cello
+  const runInstrument = q.get('instrument') || (q.get('exprdemo') ? 'cello' : '')
+  if (runInstrument) setInstrument(runInstrument)
   setOutput(settings.audioOutput || '')
   setVolume(settings.volume / 100)
   setBackingVolume(settings.backingVolume / 100)
@@ -181,16 +185,7 @@ function boot() {
       if (['left', 'right', 'both'].includes(q.get('hands'))) { settings.hands = q.get('hands'); player.setHandFilter(settings.hands); syncHudButtons() }
       // speed=0.5|0.75|1 plays slower, as the speed track does (a demo clip's half-speed run)
       if (['0.5', '0.75', '1'].includes(q.get('speed'))) setSpeed(q.get('speed'))
-      // autoplay=1 (or a delay in ms) starts playback: used by scripts/record.sh.
-      // rec=<seconds> also records that much of it as a take, whatever the setting
-      // (scripts/record-clip.sh)
-      const recSecs = Number(q.get('rec')) || 0
-      if (q.get('autoplay')) setTimeout(() => {
-        if (!player || player.active) return
-        if (recSecs > 0 && beginTake('rec query')) setTimeout(() => endTake('rec ' + recSecs + ' s'), recSecs * 1000)
-        togglePlay()
-        startDemoScripts(q)
-      }, Math.max(400, Number(q.get('autoplay')) || 0))
+      autoplayDemo(q)
       if (q.get('res')) {
         showResults({ overallAccuracy: 0.86, noteAccuracy: 0.86, rhythmAccuracy: 0.76, totalNotes: 42, totalNotesHit: 36, perfect: 24, good: 8, early: 2, late: 2, missed: 6, longestStreak: 11, starRating: 4 })
       }
@@ -199,12 +194,14 @@ function boot() {
   if (q.get('freeplay') !== null && q.get('freeplay') !== undefined && q.has('freeplay')) {
     startFreeplay(Number(q.get('freeplay') || 0))
     // rec=<seconds> records the Playground too (scripts/record-clip.sh), starting autoplay
-    // ms after load; fpdemo=1 plays a chord progression in it, so the take has the chord names
+    // ms after load; fpdemo=1 plays a chord progression in it, so the take has the chord names;
+    // exprdemo=1 presses into and wiggles a key (pressure, vibrato, a bend glide)
     const recSecs = Number(q.get('rec')) || 0
-    if (recSecs > 0 || q.get('fpdemo')) setTimeout(() => {
+    if (recSecs > 0 || q.get('fpdemo') || q.get('exprdemo')) setTimeout(() => {
       if (!freeplay) return
       if (recSecs > 0 && beginTake('rec query')) setTimeout(() => endTake('rec ' + recSecs + ' s'), recSecs * 1000)
       if (q.get('fpdemo')) playFreeplayDemo()
+      if (q.get('exprdemo')) playExpressionDemo()
     }, Math.max(400, Number(q.get('autoplay')) || 0))
   }
   if (q.get('style')) setLightStyle(q.get('style'), false)
@@ -221,16 +218,42 @@ function boot() {
   }
   if (location.search.includes('selftest')) runSelfTest()
   if (q.has('perf')) runPerfProbe()
+  // importdemo=1 adds a synthesised recording through the import sheet (Basic Pitch finds
+  // its notes); importdemo=play then opens the song, at pos (4 s unless given), and takes
+  // mode, autoplay and rec as demo= does, counted from when the song opens, since the
+  // transcription takes a while (scripts/record-clip.sh). lookup=0 turns the sheet's online
+  // cover and lyrics search off for the run, so the song is all the app's own work.
   if (q.get('importdemo')) {
+    if (q.get('lookup') === '0') $('impLookup').checked = false
     const tune = [55, 60, 64, 60, 64, 62, 60, 57, 55, 55, 60, 64, 60, 64, 62, 67]
     synthTestRecording('Traditional - Amazing Grace.wav', tune).then((f) => handleImportFile(f)).then(() => {
-      if (q.get('importdemo') === 'play' && importedRecord) { closeImportSheet(); openImported(importedRecord.id).then(() => { if (player) player.seek(Number(q.get('pos') || 4)) }) }
+      if (q.get('importdemo') === 'play' && importedRecord) {
+        closeImportSheet()
+        openImported(importedRecord.id).then(() => {
+          if (!player) return
+          player.seek(Number(q.get('pos') || 4))
+          if (q.get('mode')) setMode(q.get('mode'))
+          autoplayDemo(q)
+        })
+      }
     })
   }
   if (q.get('sheet')) openImportSheet()
 }
 
 /* ============================== scripted demo clips ============================== */
+// autoplay=1 (or a delay in ms) starts the open song playing: used by scripts/record.sh.
+// rec=<seconds> also records that much of it as a take, whatever the setting
+// (scripts/record-clip.sh)
+function autoplayDemo(q) {
+  const recSecs = Number(q.get('rec')) || 0
+  if (q.get('autoplay')) setTimeout(() => {
+    if (!player || player.active) return
+    if (recSecs > 0 && beginTake('rec query')) setTimeout(() => endTake('rec ' + recSecs + ' s'), recSecs * 1000)
+    togglePlay()
+    startDemoScripts(q)
+  }, Math.max(400, Number(q.get('autoplay')) || 0))
+}
 // Demo-only (scripts/record-clip.sh), each inactive without its query. A take records the
 // stage alone, so what they show must be in the notes themselves.
 // waitdemo=<ms>: a stand-in player for Wait mode. Once the song has waited <ms> on the
@@ -297,6 +320,68 @@ function playFreeplayDemo() {
       setTimeout(() => handleNoteOff(p), t + dur * 1000)
     })
   }
+}
+
+// exprdemo=1: what pressing into and wiggling a key does, sent through handleMidiMessage on
+// a channel of the note's own, as the keyboard sends it in MPE mode. E4 swells with pressure,
+// holds full pressure and lets go (~2.7 s; the rest and the full stretch each last at least a
+// period of the cello's 1.6 Hz chorus beat there, so the swell stands clear of it); G4 sings
+// with vibrato (pitch bend wiggled +/-0.4 semitone at 5.5 Hz, ~2.4 s), then glides up a tone
+// and back (~1.5 s). Bend and pressure go back to rest at the end.
+function playExpressionDemo() {
+  const CH = 1
+  if (!settings.expression) console.log('EXPRDEMO pitch bend and pressure are off in Settings: the notes will play flat')
+  const send = (bytes) => { if (freeplay) handleMidiMessage(bytes) }
+  const range = settings.bendRange || 12
+  const bendMsg = (semis) => {
+    const raw = Math.max(0, Math.min(16383, Math.round(8192 + (semis / range) * 8192)))
+    return [0xE0 | CH, raw & 0x7f, raw >> 7]
+  }
+  const pressMsg = (v) => [0xD0 | CH, Math.max(0, Math.min(127, Math.round(v * 127)))]
+  const ease = (u) => (1 - Math.cos(Math.PI * Math.max(0, Math.min(1, u)))) / 2   // 0..1, smooth at both ends
+  const VIB = { from: 3.35, cycles: 13, hz: 5.5, semis: 0.4 }
+  VIB.to = VIB.from + VIB.cycles / VIB.hz                          // ends on a zero crossing
+  const GLIDE = { from: VIB.to + 0.1, up: 0.55, hold: 0.4, down: 0.55, semis: 2 }
+  const end2 = GLIDE.from + GLIDE.up + GLIDE.hold + GLIDE.down + 0.12
+  // [start, end, pitch, velocity, pressure(t), bend(t)], t in seconds from the start
+  const notes = [
+    [0.3, 3.05, 64, 72, (t) => ease((t - 0.95) / 0.65) * (1 - ease((t - 2.3) / 0.65)), () => 0],
+    [3.25, end2, 67, 80, (t) => 0.55 * ease((t - 3.25) / 0.25), (t) => {
+      if (t >= VIB.from && t < VIB.to) {
+        const depth = VIB.semis * ease((t - VIB.from) / 0.3) * ease((VIB.to - t) / 0.15)
+        return depth * Math.sin(2 * Math.PI * VIB.hz * (t - VIB.from))
+      }
+      const g = t - GLIDE.from
+      if (g < 0) return 0
+      if (g < GLIDE.up) return GLIDE.semis * ease(g / GLIDE.up)
+      if (g < GLIDE.up + GLIDE.hold) return GLIDE.semis
+      return GLIDE.semis * (1 - ease((g - GLIDE.up - GLIDE.hold) / GLIDE.down))
+    }]
+  ]
+  const t0 = performance.now()
+  let on = null, lastP = -1, lastB = ''
+  const tick = setInterval(() => {
+    const t = (performance.now() - t0) / 1000
+    const n = notes.find(([a, b]) => t >= a && t < b) || null
+    if (n !== on) {
+      if (on) send([0x80 | CH, on[2], 0])
+      on = n
+      if (n) {
+        send(bendMsg(0)); send(pressMsg(0)); lastP = 0; lastB = bendMsg(0).join()
+        send([0x90 | CH, n[2], n[3]])
+      }
+    }
+    if (on) {
+      const p = pressMsg(on[4](t)), b = bendMsg(on[5](t))
+      if (p[1] !== lastP) { send(p); lastP = p[1] }
+      if (b.join() !== lastB) { send(b); lastB = b.join() }
+    }
+    if (t >= end2 + 0.05) {
+      clearInterval(tick)
+      send(bendMsg(0)); send(pressMsg(0))
+      setTimeout(() => console.log('EXPRDEMO done voices=' + activeVoiceCount() + ' held=' + held.size + ' bend=' + JSON.stringify(voiceState(CH, 67))), 600)
+    }
+  }, 8)
 }
 
 /* ============================== first-run setup ============================== */
@@ -2407,7 +2492,7 @@ function takeMeta(trigger) {
     rate: player ? player.rate : 1,
     hands: player ? player.handFilter : 'both',
     view: freeplay ? 'CASCADE' : settings.view,
-    instrument: settings.instrument,
+    instrument: currentInstrument(),   // a demo run can play on another than the setting's
     keyboard: { lowest: player ? player.windowStart : kbBase(), keys: 24 }   // the keys on screen
   }
   if (lessonMeta) meta.lesson = { id: lessonMeta.id, step: lessonMeta.step }

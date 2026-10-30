@@ -7,8 +7,11 @@
 # query sets a mode), records <seconds> of it with its own take recorder (rec=<seconds>,
 # renderer/recorder.js) and quits. The take becomes <out.mp4>: constant 60 fps H.264
 # (crf 16, yuv420p, +faststart) with AAC 256k audio, and its JSON sidecar is written
-# next to it as <out>.json. Seconds default to 12. The query must open a song (demo=...)
-# or the Playground (freeplay=<root>; add fpdemo=1 for a scripted chord progression).
+# next to it as <out>.json. Seconds default to 12. The query must open a song (demo=...),
+# the Playground (freeplay=<root>; add fpdemo=1 for a scripted chord progression, or
+# exprdemo=1 for pressure, vibrato and a bend glide), or a recording added through the
+# import sheet (importdemo=play: Basic Pitch transcribes a synthesised tune, then the song
+# plays from pos=<s>, 4 s unless given; the delay counts from when it opens).
 # LUMI_SHOT_DELAY (ms, default 2500) waits after the page loads before the song starts;
 # KEEP_TAKE=1 keeps the raw take and the profile; ELECTRON_APP picks the Electron bundle.
 # LUMI_SCALE=2 draws the stage at twice the pixels (2560 wide), as on a Retina screen;
@@ -26,7 +29,7 @@ OUT=${2:a}
 DURATION=${3:-12}
 DELAY=${LUMI_SHOT_DELAY:-2500}
 SIDECAR="${OUT:r}.json"
-[[ "$QUERY" == (*\&|)(demo|freeplay)=* ]] || { echo "error: the query must open a song with demo=<song> (for example 'demo=twinkle&pos=0') or the Playground with freeplay=<root>" >&2; exit 2; }
+[[ "$QUERY" == (*\&|)(demo=|freeplay=|importdemo=play)* ]] || { echo "error: the query must open a song with demo=<song> (for example 'demo=twinkle&pos=0'), the Playground with freeplay=<root>, or an added recording with importdemo=play" >&2; exit 2; }
 [[ $DURATION == <-> || $DURATION == <->.<-> ]] && (( DURATION > 0 )) || { echo "error: seconds must be a positive number" >&2; exit 2; }
 FFMPEG=$(command -v ffmpeg || print -r -- /opt/homebrew/bin/ffmpeg)
 FFPROBE=$(command -v ffprobe || print -r -- /opt/homebrew/bin/ffprobe)
@@ -56,8 +59,11 @@ echo "Recording ${DURATION}s of '$QUERY' with sound (starts ${DELAY} ms after lo
 env -u ELECTRON_RUN_AS_NODE -u LUMI_SOUND LUMI_NO_KEYBOARD=1 LUMI_USERDATA="$WORK/profile" LUMI_QUERY="$QUERY" \
   LUMI_REC_DIR="$TAKES" LUMI_REC_QUIT=1 "$ELECTRON" "$ROOT" "${SCALE_ARGS[@]}" >/dev/null 2>&1 &
 PID=$!
-# The app quits by itself once the take's video and JSON are saved.
-deadline=$(( SECONDS + DELAY / 1000.0 + DURATION + 60 ))
+# The app quits by itself once the take's video and JSON are saved (an importdemo run
+# transcribes its recording first, which gets another 90 s).
+EXTRA=0
+[[ "$QUERY" == *importdemo=* ]] && EXTRA=90
+deadline=$(( SECONDS + DELAY / 1000.0 + DURATION + 60 + EXTRA ))
 while kill -0 $PID 2>/dev/null; do
   if (( SECONDS > deadline )); then
     echo "error: the app did not finish in time; stopping it" >&2
