@@ -14,10 +14,10 @@
 import { createScore, judgeHit, markHit, markWrong, tickMisses, summarize, resetExpected, carryOver, WINDOWS } from './scoring.js'
 import { noteGroups } from './songloader.js'
 
-export const WINDOW_KEYS = 24
+export const WINDOW_KEYS = 24      // a longer keyboard sets player.windowKeys
 
 export class Player {
-  // onWindow(start): a song in window parts moved the 24 keys (the app moves the keyboard)
+  // onWindow(start): a song in window parts moved the keys (the app moves the keyboard)
   constructor({ getCtx, onState, onJudgement, onFinish, onWindow }) {
     this.getCtx = getCtx || (() => null)
     this.onState = onState || (() => {})
@@ -35,6 +35,7 @@ export class Player {
     this.countIn = 0            // beats, 0 = off
     this.metronome = { on: false, audible: true }
     this.windowStart = 60
+    this.windowKeys = WINDOW_KEYS
     this.noteLabels = 'off'
     this.view = 'CASCADE'
 
@@ -60,10 +61,11 @@ export class Player {
   }
 
   // ---------- loading ----------
-  load(song) {
+  // stay: where the keys are, when the app can't move them. The window is there, whatever
+  // the song, and the app plays any notes they can't reach.
+  load(song, stay = null) {
     this.song = song
-    this._parts = windowParts(song)
-    this.windowStart = this._parts ? this._parts[0].start : fitWindow(song.notes)
+    this._fitWindow(stay)
     this._partStart = this.windowStart
     this.loop = { a: null, b: null, on: false }
     this.endAt = null
@@ -85,7 +87,7 @@ export class Player {
 
   get end() { return this.endAt != null ? Math.min(this.endAt, this.song.duration) : this.song.duration }
 
-  // Notes the player is asked to play: the selected hand, inside the 24 keys,
+  // Notes the player is asked to play: the selected hand, inside the keys,
   // before the end of the section.
   playableNotes() {
     const end = this.song ? this.end : Infinity
@@ -93,13 +95,13 @@ export class Player {
     return this.speedNotes.filter((n) => this._reachable(n) && n.start < end - 1e-4 && n.start >= from - 1e-4)
   }
 
-  // Notes the app plays for you: the other hand, and anything the 24 keys can't reach.
+  // Notes the app plays for you: the other hand, and anything the keys can't reach.
   accompanimentNotes() {
     if (!this.song) return []
     return this.song.notes.filter((n) => !(this.handFilter === 'both' || n.hand === this.handFilter) || !this._reachable(n))
   }
 
-  // A song can move the 24 keys part way through (song.windows, e.g. a both-hands
+  // A song can move the keys part way through (song.windows, e.g. a both-hands
   // scale played left hand, then right hand). Each note is played in the window of
   // its own part, so moving the keys never drops a note from the score.
   windowAt(t) {
@@ -111,10 +113,10 @@ export class Player {
 
   _reachable(n) {
     const ws = this.windowAt(n.start)
-    return n.pitch >= ws && n.pitch < ws + WINDOW_KEYS
+    return n.pitch >= ws && n.pitch < ws + this.windowKeys
   }
 
-  // Notes per hand the 24 keys can reach: a hand with none can't be played on its own.
+  // Notes per hand the keys can reach: a hand with none can't be played on its own.
   handCounts() {
     const counts = { left: 0, right: 0 }
     if (this.song) for (const n of this.song.notes) if (this._reachable(n)) counts[n.hand === 'left' ? 'left' : 'right']++
@@ -318,12 +320,31 @@ export class Player {
     if (wasActive && !this.playing) this.play()
     this._emit()
   }
+  // The keyboard turned out longer or shorter: fit the song to it again.
+  setWindowKeys(n, stay = null) {
+    if (n === this.windowKeys) return
+    const wasActive = this.active
+    if (this.active) this.pause()
+    this.windowKeys = n
+    if (this.song) {
+      this._fitWindow(stay)
+      this._partStart = this.windowStart
+      this._reindex()
+      this.epoch++
+    }
+    if (wasActive && !this.playing) this.play()
+    this._emit()
+  }
+  _fitWindow(stay) {
+    this._parts = stay == null ? windowParts(this.song, this.windowKeys) : null
+    this.windowStart = stay ?? (this._parts ? this._parts[0].start : fitWindow(this.song.notes, this.windowKeys))
+  }
   setNoteLabels(v) { this.noteLabels = v; this._emit() }
   setView(v) { this.view = v; this._emit() }
 
   keyIndexFor(pitch) {
     const i = pitch - this.windowStart
-    return i >= 0 && i < WINDOW_KEYS ? i : -1
+    return i >= 0 && i < this.windowKeys ? i : -1
   }
 
   // ---------- per-frame tick ----------
@@ -502,21 +523,23 @@ export class Player {
   _emit() { this.onState({}) }
 }
 
-// Pick the 24-key window that covers the most notes, aligned to an octave.
-export function fitWindow(notes) {
+// Pick the window of `keys` keys that covers the most notes, aligned to an octave.
+export function fitWindow(notes, keys = WINDOW_KEYS) {
   if (!notes || !notes.length) return 60
   const spans = new Map()
   for (const n of notes) {
     const base = Math.floor(n.pitch / 12) * 12
     spans.set(base, (spans.get(base) || 0) + 1)
   }
+  const covered = (start) => notes.filter((n) => n.pitch >= start && n.pitch < start + keys).length
+  // the first key that puts middle C nearest the middle of the keys
+  const centre = 66 - Math.ceil(keys / 2)
   let bestStart = 60, best = -1
   for (const base of spans.keys()) {
-    for (const cand of [base, base - 12]) {
-      if (cand < 0) continue
-      const count = notes.filter((n) => n.pitch >= cand && n.pitch < cand + WINDOW_KEYS).length
+    for (let cand = base; cand > base - keys && cand >= 0; cand -= 12) {
+      const count = covered(cand)
       // ties go to the window closer to middle C, where songs are usually written
-      if (count > best || (count === best && Math.abs(cand - 54) < Math.abs(bestStart - 54))) { best = count; bestStart = cand }
+      if (count > best || (count === best && Math.abs(cand - centre) < Math.abs(bestStart - centre))) { best = count; bestStart = cand }
     }
   }
   return bestStart
@@ -524,12 +547,17 @@ export function fitWindow(notes) {
 
 // song.windows = [{ at, start? }]: where each window part begins (song seconds) and
 // its first key. A part without a start gets the window that fits its own notes.
-function windowParts(song) {
+function windowParts(song, keys) {
   const parts = song && song.windows
   if (!Array.isArray(parts) || !parts.length) return null
+  // a longer keyboard that has every note at once doesn't need to move
+  if (keys > WINDOW_KEYS) {
+    const start = fitWindow(song.notes, keys)
+    if (song.notes.every((n) => n.pitch >= start && n.pitch < start + keys)) return null
+  }
   return parts.map((p, i) => {
     const until = i + 1 < parts.length ? parts[i + 1].at : Infinity
     const own = song.notes.filter((n) => n.start >= p.at - 1e-4 && n.start < until - 1e-4)
-    return { at: p.at, start: Number.isFinite(p.start) ? p.start : fitWindow(own) }
+    return { at: p.at, start: Number.isFinite(p.start) ? p.start : fitWindow(own, keys) }
   })
 }

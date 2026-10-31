@@ -246,6 +246,8 @@
           <label class="setting">Pitch bend &amp; pressure <input id="exprToggle" type="checkbox"></label>
           <div class="setting-row"><span id="lightsLabel">Light service</span><span id="daemonState">checking…</span></div>
           <div class="setting-row hidden" id="batteryRow"><span>Keyboard battery</span><span id="kbBattery"></span></div>
+          <label class="setting" title="The MIDI input Keylight listens to. Automatic looks for your keyboard by name">Keyboard <select id="kbPort"></select></label>
+          <label class="setting" title="Setup also works this out when you press the two end keys">Number of keys <select id="kbKeys"><option value="0">Automatic</option><option value="24">24 keys</option><option value="49">49 keys</option></select></label>
           <div class="setting-row"><span>Keys play</span><span>
             <button class="oct-mini" id="setOctDown" title="Octave down" aria-label="Octave down"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
             <span id="kbRange">—</span>
@@ -380,7 +382,7 @@
   <div class="sheet">
     <button class="iconbtn sheet-close" id="importClose" title="Close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
     <h2>Add a song</h2>
-    <p class="sheet-sub" id="importPrivacy">A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on this Mac.</p>
+    <p class="sheet-sub" id="importPrivacy">A recording becomes notes on this Mac, and the file is never uploaded. MIDI and MusicXML files are read as written.</p>
     <label class="dropzone" id="dropZone">
       <input id="importFile" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.aif,.aiff,.mid,.midi,.xml,.musicxml,.mxl" hidden>
       <div class="dz-icon"><svg><use href="#i-plus"/></svg></div>
@@ -440,13 +442,14 @@
         <span class="ob-check-text" id="obCheckText"></span>
         <span class="ob-answer hidden" id="obAnswer"><button class="mini-btn yes" id="obLightsYes">Yes</button><button class="mini-btn" id="obLightsNo">No</button></span>
       </div>
+      <label class="ob-port hidden" id="obPortRow"><span>Keyboard</span><select id="obKbPort"></select></label>
       <div class="ob-panel" data-panel="sound">
         <label class="ob-volume"><span>Volume</span><input id="obVolume" type="range" min="0" max="100" value="80"></label>
         <button class="mini-btn" id="obTestNote">Play a test note</button>
         <p class="ob-note hidden" id="obLatency"></p>
       </div>
       <div class="ob-panel" data-panel="keyboard">
-        <p class="ob-hint">Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.</p>
+        <p class="ob-hint" id="obOctaveHint">Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.</p>
       </div>
       <div class="ob-panel" data-panel="lights">
         <button class="mini-btn hidden" id="obLightsAgain">Show the lights again</button>

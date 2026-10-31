@@ -4,8 +4,9 @@
 
 **Mac** · **Windows (beta)** · iOS & Android coming soon · [Download](https://github.com/scizerss/keylight-piano/releases/latest)
 
-An open-source piano-learning app for the 24-key light-up keyboards ROLI made (Piano M
-and LUMI Keys), for people whose keyboard lost its app when ROLI Learn was discontinued.
+An open-source piano-learning app for the light-up keyboards ROLI made (the 24-key Piano M
+and LUMI Keys, and in beta [the 49-key ROLI Piano](#the-49-key-roli-piano-beta)), for people
+whose keyboard lost its app when ROLI Learn was discontinued.
 Falling notes in 3D over a keyboard that looks like yours, the real keys lighting up
 the next note, lessons, songs, games and a Playground, all running on your Mac or
 Windows PC with no account. On a Mac the lighting goes through the open-source
@@ -71,7 +72,7 @@ Full videos with sound: [app tour (65 s)](https://github.com/scizerss/keylight-p
 
 - A Mac with Apple Silicon (M1 or later) on macOS 13 or newer, or a 64-bit PC with
   Windows 10 or 11
-- A ROLI Piano M or LUMI Keys over USB
+- A ROLI Piano M or LUMI Keys over USB, or in beta the [49-key ROLI Piano](#the-49-key-roli-piano-beta)
 - On a Mac, [blocksd](https://github.com/hyperb1iss/blocksd) for the key lights (step 4
   below). Windows needs nothing else: the keys light in the keyboard's own colours
   there (see [Install on Windows](#install-on-windows))
@@ -119,8 +120,8 @@ with Apple Silicon (M1 or later) on macOS 13 or newer, and the keyboard.
 ## Install on Windows
 
 You need a 64-bit PC with Windows 10 or 11, and the keyboard. Windows support is new
-and has not been tried with the keyboard on Windows yet: please say how it goes in an
-[issue](https://github.com/scizerss/keylight-piano/issues).
+and has not been tried with a Piano M or LUMI Keys on Windows yet: please say how it goes
+in an [issue](https://github.com/scizerss/keylight-piano/issues).
 
 1. Download `Keylight-<version>-win-x64.zip` from the
    [Releases page](https://github.com/scizerss/keylight-piano/releases).
@@ -335,6 +336,29 @@ the far-right one) and the lights; Settings → Run setup again repeats it. Sett
 Keyboard lights → Test lights runs a light across every key and clears any stuck
 light; the keyboard's battery level shows there too. In the Playground the chord you
 hold is named above the keys.
+
+## The 49-key ROLI Piano (beta)
+
+Keylight shows all 49 keys, and your song, lessons and the Playground use the whole
+keyboard. This was built from a tester's measurements and simulated key presses, and has
+not been checked on the keyboard by the maintainer yet, so please report how it goes in an
+[issue](https://github.com/scizerss/keylight-piano/issues).
+
+- **Number of keys:** a port named "ROLI Piano" is recognised. Otherwise press the two end keys
+  in the setup (Settings > Run setup again), or Keylight works it out once you have twice played
+  notes more than 24 keys apart at the same moment. Settings > Number of keys overrules it.
+- **Wrong input?** Choose your keyboard in Settings > Keyboard. Keylight remembers it, and
+  shows it as "(not connected)" while it is unplugged rather than switching to another input.
+  Without ROLI's software, Windows' USB MIDI 2.0 driver calls the keyboard "USBMidi2-ACX".
+- **Key lights:** blocksd only drives the 24-key keyboards, so Keylight sends MIDI notes for
+  the lights, on Mac as well as Windows. Whether the 49-key keyboard lights up from them is
+  not confirmed yet. A port named "USBMidi2-ACX" only gets them once you choose it by name,
+  since any other device with that name would play them as music.
+- **Octave:** Keylight can't move this keyboard's octave or ask where it is, so the screen shows
+  where the keys last were, for every song, and tells you when notes sit beyond them. If you
+  use the keyboard's own octave buttons, it follows when you play a note off the screen or
+  several notes an octave away from the song. Otherwise − and + in the player line the screen
+  up with your keys.
 
 ## Lighting
 

@@ -1,7 +1,7 @@
 import { COLORS, FONTS, MODES, NOTE_VIEWS, NOTE_LABELS } from './theme.js'
 import { IS_WIN, THIS_COMPUTER, TAKES_FOLDER } from './platform.js'
-import { Player } from './player.js'
-import { drawScene, noteName } from './views.js'
+import { Player, fitWindow } from './player.js'
+import { drawScene, noteName, setKeyCount } from './views.js'
 import { loadSongFile } from './songloader.js'
 import { assignFingering } from './fingering.js'
 import { parseMusicXml } from './musicxml.js'
@@ -15,7 +15,7 @@ import {
   loadBackingFile, hasBacking, backingDuration, playBacking, stopBacking,
   setBackingVolume, setVolume, playBass, playHat, pickStem,
   setInstrument, currentInstrument, instrumentList, setBend, setPressure, setSlide,
-  setPolyPressure, setBendRange, activeVoiceCount, voiceState, clearBacking, isBackingPlaying, setSustain,
+  setPolyPressure, setBendRange, activeVoiceCount, voiceState, clearBacking, isBackingPlaying, setSustain, sustainDown,
   loadRecording, unloadRecording, hasRecording, playRecording, pauseRecording, recordingPosition, nudgeRecording,
   listOutputs, setOutput, latencyInfo
 } from './audio.js'
@@ -68,7 +68,7 @@ const DEFAULTS = {
   brightness: 255, volume: 80, backingVolume: 70,
   countIn: 4, metronome: false, labels: 'off', view: 'CASCADE',
   hands: 'both', rate: 1, band: false, waitMode: 'pauseAndSnap', instrument: 'grand', keyboardMode: 'Pro', bendRange: 12,
-  accompany: true, kbZero: 48, userColor: '#a78bfa', expression: null, audioOutput: '',
+  accompany: true, kbZero: 48, kbPort: '', kbLast: '', kbKeysFor: {}, kbBaseFor: {}, userColor: '#a78bfa', expression: null, audioOutput: '',
   recordTakes: false
 }
 
@@ -149,6 +149,10 @@ function boot() {
   const q = new URLSearchParams(location.search)
   if (IS_WIN) applyWindowsPage()
   wireUI()
+  if (KB_SIZES.includes(Number(q.get('keys')))) settings.kbKeysFor[kbLabel()] = Number(q.get('keys'))   // keys=49: the longer keyboard, for screenshots
+  restoreKeysAt()
+  applyKeyCount()
+  fillKbPorts()
   const ob = $('onboarding')
   const skipOb = q.has('demo') || q.has('screen') || q.has('tb') || q.has('importdemo') || q.has('freeplay') || q.has('selftest') || q.has('perf')
   // setup=1..4 opens the setup at that step even once it is done (screenshots, support)
@@ -401,7 +405,7 @@ const setup = {
   seen: new Set(), lastTick: 0, glow: new Array(14).fill(0),
   returnFocus: null   // what had focus before the setup opened (Run setup again)
 }
-const keysRange = () => noteName(kbBase()) + '–' + noteName(kbBase() + 23)
+const keysRange = () => noteName(kbBase()) + '–' + noteName(kbBase() + kbKeys() - 1)
 const setText = (el, text) => { if (el && el.textContent !== text) el.textContent = text }
 const SETUP_CHECK = '<svg><use href="#i-check"/></svg>'
 
@@ -485,9 +489,9 @@ function sweepSetupLights() {
 
 function setupLightsState() {
   if (daemon && daemon.ready) return 'on'
-  // Windows has no light service: the keyboard lights keys from MIDI notes ('midi'), once
+  // No light service for this keyboard: it lights keys from MIDI notes ('midi'), once
   // its MIDI output is found ('no-output' until then; 'checking' while MIDI starts)
-  if (IS_WIN) return midiOutput ? 'midi' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'no-output'
+  if (noteLightsOnly()) return midiOutput ? 'midi' : midiInput ? 'no-light-port' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'no-output'
   return daemonState === 'no-device' ? 'no-device' : daemonState === 'checking' ? 'checking' : 'off'
 }
 
@@ -510,10 +514,10 @@ function setupKeysTick() {
     if (keys[i].classList.contains('down') !== on) keys[i].classList.toggle('down', on)
   }
 }
-// Which of the 14 drawn white keys a note lands on (a black key lights the white key below it)
+// Which of the drawn white keys a note lands on (a black key lights the white key below it)
 function drawnKeyIndex(pitch) {
   const r = pitch - kbBase()
-  if (r < 0 || r >= 24) return -1
+  if (r < 0 || r >= kbKeys()) return -1
   return Math.floor(r / 12) * 7 + [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6][r % 12]
 }
 
@@ -526,20 +530,24 @@ function onSetupKey(pitch) {
   } else if (step === 'keyboard' && !setup.rangeDone) {
     const r = readEndKeys(setup.lowKey, pitch, kbBase())
     if (r.done) {
-      if (r.shift) recalibrate(r.shift, 'setup: end keys ' + setup.lowKey + ' and ' + pitch)
+      learnKeyCount(r.keys)     // may move the window to fit a loaded song, so the shift comes after
+      const shift = setup.lowKey - kbBase()
+      if (shift) recalibrate(shift, 'setup: end keys ' + setup.lowKey + ' and ' + pitch)
+      rememberKeysAt()
       setup.rangeDone = true
-      console.log('SETUP end keys ' + setup.lowKey + ' and ' + pitch + ': keys play ' + keysRange() + (r.shift ? ' (was off by ' + r.shift + ')' : ''))
+      console.log('SETUP end keys ' + setup.lowKey + ' and ' + pitch + ': keys play ' + keysRange() + (shift ? ' (was off by ' + shift + ')' : ''))
     } else { setup.lowKey = r.low; setup.wrongKey = r.wrong ?? null }
     renderSetup()
   }
 }
 
 // The keyboard step's two presses. The far-left key is always a C and the far-right one
-// is 23 keys above it. Only the pair pins the range down: one press of a C can't tell the
-// bottom C from the middle one. When done, shift is how far `base` (the range the app
-// assumed, kbBase) was off.
+// is 23 keys above it (48 on the 49-key ROLI Piano). Only the pair pins the range down: one
+// press of a C can't tell the bottom C from the middle one. When done, keys is how many the
+// keyboard has and shift is how far `base` (the range the app assumed, kbBase) was off.
 function readEndKeys(low, pitch, base) {
-  if (low != null && pitch === low + 23) return { done: true, shift: low - base }
+  const keys = low == null ? 0 : pitch - low + 1
+  if (KB_SIZES.includes(keys)) return { done: true, shift: low - base, keys }
   if ((((pitch - base) % 12) + 12) % 12 === 0) return { low: pitch }
   return { low: null, wrong: pitch }
 }
@@ -586,15 +594,17 @@ function renderSetup() {
     v = {
       title: canLight ? 'Watch your keys' : 'Light up your keys',
       copy: canLight ? 'A light runs along your keys from left to right.'
-        : IS_WIN ? 'Your keys light up to show you what to play next, in your keyboard’s own colours.'
+        : noteLightsOnly() ? 'Your keys light up to show you what to play next, in your keyboard’s own colours.'
         : 'Your keys light up to show you what to play next. A free helper, blocksd, drives the lights.',
       check: canLight
         ? (setup.lights === 'yes' ? ['ok', 'Your keys light up']
           : setup.lights === 'no' ? ['warn', 'Check the keyboard is switched on and plugged in over USB, then show the lights again.']
           : ['wait', 'Did your keys light up?'])
         : lights === 'no-device' ? ['warn', 'The light service is running but can’t find your keyboard. Plug it in over USB and switch it on.']
-        : lights === 'checking' ? ['wait', IS_WIN ? 'Looking for your keyboard…' : 'Looking for the light service…']
+        : lights === 'checking' ? ['wait', noteLightsOnly() ? 'Looking for your keyboard…' : 'Looking for the light service…']
         : lights === 'no-output' ? ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
+        : lights === 'no-light-port' ? ['warn', canChooseLights() ? 'Your keyboard plays, but its name doesn’t say it can light up. If this is your light-up keyboard, choose it by name below.'
+          : 'Your keyboard plays, but Keylight doesn’t recognise its name, and on most keyboards light notes would play as music. So its keys stay unlit.']
         : ['warn', 'The light service isn’t running, so your keys can’t light up yet.'],
       skip: canLight && setup.lights == null ? 'Skip' : 'Continue without key lights'
     }
@@ -617,6 +627,12 @@ function renderSetup() {
   }
   $('obAnswer').classList.toggle('hidden', !(step === 'lights' && canLight && setup.lights == null))
   for (const p of ob.querySelectorAll('.ob-panel')) p.classList.toggle('hidden', p.dataset.panel !== step)
+  // the keyboard list: when there's a choice to make, or the lights depend on it
+  const inputs = midi ? [...midi.inputs.values()].filter((p) => p.state !== 'disconnected').length : 0
+  $('obPortRow').classList.toggle('hidden', !(step === 'lights' ? lights === 'no-light-port' && canChooseLights()
+    : step !== 'ready' && (settings.kbPort || inputs > 1 || (inputs && !midiInput))))
+  setText($('obOctaveHint'), keysStayAt() != null ? 'Later, in the player, − and + at the top right line the screen up with your keys if they ever differ. Z and X do the same.'
+    : 'Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.')
   // Bluetooth headphones are the usual cause of a long output delay
   const ac = audioContext()
   const out = ac ? ac.outputLatency || 0 : 0
@@ -641,8 +657,8 @@ function renderSetup() {
   setText(skip, v.skip || 'Skip')
   skip.classList.toggle('hidden', passed && step !== 'ready')
   // the drawn keyboard marks the end key to press next
-  const guide = step === 'keyboard' && !setup.rangeDone && kb === 'on' ? (setup.lowKey == null ? 0 : 13) : -1
   const keys = $('obKeys').children
+  const guide = step === 'keyboard' && !setup.rangeDone && kb === 'on' ? (setup.lowKey == null ? 0 : keys.length - 1) : -1
   for (let i = 0; i < keys.length; i++) if (keys[i].classList.contains('guide') !== (i === guide)) keys[i].classList.toggle('guide', i === guide)
 }
 
@@ -653,6 +669,7 @@ function renderSetupSummary(lights) {
     ['Lights', setup.lights === 'yes', setup.lights === 'yes' ? 'Your keys light up'
       : lights === 'off' ? 'Off for now: the light service isn’t running'
       : lights === 'no-output' ? 'Off for now: no keyboard found'
+      : lights === 'no-light-port' ? (canChooseLights() ? 'Off for now: choose your keyboard by name in Settings' : 'Off: Keylight doesn’t recognise this keyboard')
       : setup.lights === 'no' ? 'Not seen yet: run the setup again from Settings' : 'Skipped']
   ]
   const html = rows.map(([name, ok, text]) => `<li data-state="${ok ? 'ok' : 'skip'}"><span class="ob-mark">${SETUP_CHECK}</span><b>${name}</b><span>${text}</span></li>`).join('')
@@ -686,7 +703,15 @@ function wireFirstRunUI() {
   $('obCopy').onclick = async () => {
     try { await navigator.clipboard.writeText($('obCode').textContent); status('Copied: paste it into Terminal') } catch { status('Select the two lines and copy them with ⌘C') }
   }
-  ;[...$('obKeys').children].forEach((k, i) => k.style.setProperty('--i', i))
+  for (const id of ['kbPort', 'obKbPort']) $(id).onchange = (e) => { settings.kbPort = e.target.value; saveSettings(); bindMidiPorts(); fillKbPorts() }
+  $('kbKeys').onchange = (e) => {
+    const keys = Number(e.target.value)
+    if (keys) settings.kbKeysFor[kbLabel()] = keys
+    else delete settings.kbKeysFor[kbLabel()]
+    if (!player) rememberKeysAt()     // going long: the keys are where the app last followed them
+    saveSettings()
+    applyKeyCount()
+  }
   document.addEventListener('keydown', onSetupKeydown)
   // the engine announces keyboard connection changes; the poll above covers older builds
   window.addEventListener('keylight:midi', () => renderSetup(), true)
@@ -1490,12 +1515,12 @@ function makeExerciseSong() {
   let hands = tb.hand + ' hand'
   if (tb.hand === 'both') {
     notes = [...part('left', 0), ...part('right', 0)].sort((a, b) => a.start - b.start)
-    // Hands together needs both octaves on the 24 keys at once. A one-octave scale
+    // Hands together needs both octaves on the keys at once. On 24 keys a one-octave scale
     // or arpeggio an octave apart spans 25, so it is played left hand, then right
     // hand, and the keys move up an octave in the bar's rest between the two.
     const pitches = notes.map((n) => n.pitch)
     const lo = Math.min(...pitches), hi = Math.max(...pitches)
-    if (hi < Math.floor(lo / 12) * 12 + 24) hands = 'both hands'
+    if (hi < Math.floor(lo / 12) * 12 + kbKeys()) hands = 'both hands'
     else {
       const leftEnd = seq.length * interval
       notes = [...part('left', 0), ...part('right', leftEnd + 4 * interval)]
@@ -1594,13 +1619,16 @@ function resetSession({ exercise = null, lesson = null, game = null } = {}) {
   hideResults()
 }
 
-// Load a song and move the keyboard's octave to the song's 24-key window.
+// Load a song and move the keyboard's octave to the song's window of keys.
 function loadIntoPlayer(song) {
   scheduler.reset()
-  player.load(song)
+  player.windowKeys = kbKeys()
+  const stay = keysStayAt()
+  player.load(song, stay)
   song.fitStart = player.windowStart
+  if (stay != null) hintOffKeys(song, stay)
   setKeyboardWindow(song.fitStart)
-  song.handCounts = player.handCounts()     // notes per hand on the 24 keys: Hands skips an empty one
+  song.handCounts = player.handCounts()     // notes per hand on the keys: Hands skips an empty one
   if (settings.rate && settings.rate !== 1) player.setRate(settings.rate)
 }
 
@@ -1774,7 +1802,7 @@ function lightTestFrames(base = kbBase()) {
 // The test owns the keys like a ceremony does, so the frame loop waits, then puts the
 // current picture back. A key still marked as held (its note-off got lost) is let go too.
 function runLightTest() {
-  if (IS_WIN && !(daemon && daemon.ready)) { runMidiLightTest(); return }
+  if (noteLightsOnly() && !(daemon && daemon.ready)) { runMidiLightTest(); return }
   if (!daemon || !daemon.ready) {
     // without the light service the keyboard lights keys from MIDI notes: switch those off
     if (midiOutput) { clearLights(midiOutput); litNotes.clear() }
@@ -1851,7 +1879,7 @@ function fingerHover(geo) {
   const out = new Map()
   if (!cameraOn() || !tracker.calib || !geo || !geo.keys || !geo.keys.length) return out
   const k0 = geo.keys[0], kN = geo.keys[geo.keys.length - 1]
-  for (const f of tracker.fingertipsOverKeys()) {
+  for (const f of tracker.fingertipsOverKeys(0.12 * 24 / kbKeys())) {
     const x = k0.cx + f.t * (kN.cx - k0.cx)
     // nearest key; a black key only when the tip is close to its centre
     let best = null, bestD = Infinity
@@ -2219,12 +2247,12 @@ function clearNoteLights() {
   for (const pitch of [...litNotes.keys()]) { try { midiOutput.send([0x80, pitch, 0]) } catch (_e) {} }
   litNotes.clear()
 }
-// Windows: the setup's light check and Test lights run a light along the 24 keys with
+// Without blocksd the setup's light check and Test lights run a light along the keys with
 // note-ons (each key stays lit for three steps), in under the setup's 1.6 s between
 // sweeps. The notes bypass litNotes, so the frame loop's updateNoteLights leaves them
 // alone; a sweep that starts over first lets go of the keys the last one still holds.
 // Returns how long the sweep takes (ms). port: the keyboard's output (the self-test's stand-in).
-const MIDI_SWEEP_STEP_MS = 55
+const MIDI_SWEEP_MS = 1485
 let midiSweepTimers = []
 const midiSweepLit = new Map()   // pitch -> the port it was lit on
 function midiLightSweep(port = midiOutput) {
@@ -2234,17 +2262,17 @@ function midiLightSweep(port = midiOutput) {
   for (const [pitch, litOn] of midiSweepLit) send(litOn, [0x80, pitch, 0])
   midiSweepLit.clear()
   if (!port) return 0
-  const base = kbBase()
-  for (let i = 0; i < 24; i++) {
+  const base = kbBase(), keys = kbKeys(), step = MIDI_SWEEP_MS / (keys + 3)
+  for (let i = 0; i < keys; i++) {
     const pitch = base + i
     if (pitch < 0 || pitch > 127) continue
-    midiSweepTimers.push(setTimeout(() => { send(port, [0x90, pitch, 127]); midiSweepLit.set(pitch, port) }, i * MIDI_SWEEP_STEP_MS))
-    midiSweepTimers.push(setTimeout(() => { send(port, [0x80, pitch, 0]); midiSweepLit.delete(pitch) }, (i + 3) * MIDI_SWEEP_STEP_MS))
+    midiSweepTimers.push(setTimeout(() => { send(port, [0x90, pitch, 127]); midiSweepLit.set(pitch, port) }, i * step))
+    midiSweepTimers.push(setTimeout(() => { send(port, [0x80, pitch, 0]); midiSweepLit.delete(pitch) }, (i + 3) * step))
   }
-  return (24 + 3) * MIDI_SWEEP_STEP_MS
+  return MIDI_SWEEP_MS
 }
 function runMidiLightTest() {
-  if (!midiOutput) { status('No keyboard found: plug it in over USB and switch it on'); return }
+  if (!midiOutput) { status(!midiInput ? 'No keyboard found: plug it in over USB and switch it on' : canChooseLights() ? 'Choose your keyboard by name in Settings to light its keys' : 'Keylight doesn’t recognise this keyboard, so its keys stay unlit'); return }
   clearLights(midiOutput)
   litNotes.clear()
   const ms = midiLightSweep()
@@ -2326,7 +2354,9 @@ function cycleLabels() {
 }
 // A hand with no notes on the 24 keys would leave you nothing to play, so Hands
 // skips it and says why.
-const noHandPart = (hand) => `This song has no ${hand}-hand part`
+// On a long keyboard the part may be there, just off the keys where they are now
+const noHandPart = (hand) => (song && keysStayAt() != null && song.notes.some((n) => n.hand === hand)
+  ? `The ${hand}-hand part is off your keys: use the octave buttons on your keyboard` : `This song has no ${hand}-hand part`)
 function cycleHands() {
   const order = ['both', 'left', 'right']
   const counts = player && player.song ? player.handCounts() : null
@@ -2465,7 +2495,7 @@ function setPlayIcon(playing) {
 }
 function syncKbRange() {
   const el = $('kbRange')
-  if (el) el.textContent = noteName(kbBase()) + ' – ' + noteName(kbBase() + 23)
+  if (el) el.textContent = noteName(kbBase()) + ' – ' + noteName(kbBase() + kbKeys() - 1)
 }
 
 /* ============================== takes ============================== */
@@ -2493,7 +2523,7 @@ function takeMeta(trigger) {
     hands: player ? player.handFilter : 'both',
     view: freeplay ? 'CASCADE' : settings.view,
     instrument: currentInstrument(),   // a demo run can play on another than the setting's
-    keyboard: { lowest: player ? player.windowStart : kbBase(), keys: 24 }   // the keys on screen
+    keyboard: { lowest: player ? player.windowStart : kbBase(), keys: kbKeys() }   // the keys on screen
   }
   if (lessonMeta) meta.lesson = { id: lessonMeta.id, step: lessonMeta.step }
   if (gameMeta) meta.game = { id: gameMeta.id, name: gameMeta.name }
@@ -2580,6 +2610,12 @@ function onFinish(summary) {
     summary.watched = true
     showResults(summary)
     renderLibrary(); renderRecent(); updateHome()
+    syncHudButtons()
+    return
+  }
+  // None of the song was on a long keyboard's keys: that says nothing about your playing
+  if (!summary.totalNotes && keysStayAt() != null) {
+    status('None of this song’s notes were on your keys. Use the octave buttons on your keyboard, or − and + if the screen is off')
     syncHudButtons()
     return
   }
@@ -2921,11 +2957,18 @@ function handleNoteOn(pitch, vel, channel = 0) {
   noteOn(pitch, vel, channel)
   logMidi('on', pitch, vel, channel)
   held.add(pitch)
+  learnLengthFromNotes(pitch)
   calibrateFromNote(pitch)
   if (!player || player.mode === 'WATCH') return
   const need = player.waiting ? new Set(player.needPitches) : null
   const res = player.noteOn(pitch)
   if (need) checkOctaveMismatch(pitch, need)
+  // A long keyboard that can't be moved from here seldom plays a note off the screen, so this
+  // is how its octave buttons get noticed outside Wait too.
+  else if (kbKeys() > 24 && !(daemon && daemon.ready) && player.clockRunning) {
+    checkOctaveMismatch(pitch, res && res.kind !== 'free' ? new Set([pitch])
+      : new Set([...player.activeNotes(), ...player.upcomingNotes()].map((n) => n.pitch).filter((p) => player.keyIndexFor(p) >= 0)))
+  }
   if (res && res.kind && ['perfect', 'good', 'early', 'late'].includes(res.kind)) feedback.set(pitch, { kind: res.kind, until: performance.now() + 220 })
 }
 function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('off', pitch, 0, channel); held.delete(pitch); letGoAt.set(pitch, performance.now()) }
@@ -2935,10 +2978,12 @@ function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('o
 // never a software bus (IAC, a network session, a DAW's virtual port), which would
 // feed the app another program's notes. Lights only go to an output named for the
 // keyboard, since any other output would play the light notes as music. A Piano M may
-// name its ports "LUMI Keys BLOCK", "ROLI Piano M" or just "Piano M".
-const KB_PORT = /lumi|\bpiano m\b/i, KB_MAKER = /roli/i
-const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|loopback|loopmidi|through|\bthru\b|rtp/i
-function pickPorts(ins, outs) {
+// name its ports "LUMI Keys BLOCK", "ROLI Piano M" or just "Piano M". The 49-key ROLI Piano
+// is "ROLI Piano", or just "USBMidi2-ACX" on Windows' USB MIDI 2.0 driver, which names every
+// port that way: only someone choosing that port says it is the keyboard.
+const KB_PORT = /lumi|\bpiano m\b/i, KB_MAKER = /roli/i, KB_UNNAMED = /usbmidi2/i
+const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|\bloop|yoke|through|\bthru\b|rtp/i
+function pickPorts(ins, outs, choice = '') {
   const label = (p) => (p.name || '') + ' ' + (p.manufacturer || '')
   const rank = (p) => (KB_PORT.test(label(p)) ? 3 : KB_MAKER.test(label(p)) ? 2 : SOFT_PORT.test(label(p)) ? 0 : 1)
   const best = (list, min) => {
@@ -2946,7 +2991,36 @@ function pickPorts(ins, outs) {
     for (const p of list) if (p && p.state !== 'disconnected' && rank(p) >= min && (!pick || rank(p) > rank(pick))) pick = p
     return pick
   }
-  return { input: best([...ins], 1), output: best([...outs], 2) }
+  ins = [...ins]; outs = [...outs]
+  const named = (list, name) => list.find((p) => p && p.name === name && p.state !== 'disconnected') || null
+  // The input you chose stays chosen: unplugged, it waits instead of another port taking over.
+  const input = choice ? named(ins, choice) : best(ins, 1)
+  if (choice && !input) return { input: null, output: null }
+  const own = input && named(outs, input.name)
+  const lightable = own && (rank(own) >= 2 || (KB_UNNAMED.test(label(own)) && !!choice))
+  return { input, output: lightable ? own : best(outs, 2) }
+}
+
+// A keyboard that plays but gets no light notes: choosing it by name helps only on that nameless port.
+const canChooseLights = () => !!midiInput && KB_UNNAMED.test(midiInput.name || '') && !settings.kbPort
+
+// Settings and the setup's list: Automatic, every input by name, and your choice marked
+// while it's unplugged.
+function fillKbPorts() {
+  const names = midi ? [...new Set([...midi.inputs.values()].filter((p) => p.state !== 'disconnected').map((p) => p.name))] : []
+  const pick = settings.kbPort
+  const options = [['', !pick && midiInput ? 'Automatic (' + midiInput.name + ')' : 'Automatic'], ...names.map((n) => [n, n])]
+  if (pick && !names.includes(pick)) options.push([pick, pick + ' (not connected)'])
+  const sig = JSON.stringify(options)
+  for (const id of ['kbPort', 'obKbPort']) {
+    const sel = $(id)
+    if (sel.dataset.sig !== sig) {
+      sel.dataset.sig = sig
+      sel.replaceChildren(...options.map(([value, text]) => { const o = document.createElement('option'); o.value = value; o.textContent = text; return o }))
+    }
+    sel.value = pick
+  }
+  renderSetup()
 }
 
 let midiState = null    // what the last 'keylight:midi' event said
@@ -2955,13 +3029,26 @@ let midiState = null    // what the last 'keylight:midi' event said
 // one found at boot. The onboarding listens for 'keylight:midi'.
 function bindMidiPorts() {
   if (!midi) return
-  const { input, output } = pickPorts(midi.inputs.values(), midi.outputs.values())
+  const { input, output } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
   if (input !== midiInput) {
     if (midiInput) midiInput.onmidimessage = null
+    // the old port's note-offs and pedal-up will never come
+    if (held.size || sustainDown()) { stopAll(); setSustain(false); held.clear(); letGoAt.clear() }
     midiInput = input
-    if (midiInput) midiInput.onmidimessage = (ev) => handleMidiMessage(ev.data)
+    lastFarAt = -Infinity
+    if (midiInput) {
+      midiInput.onmidimessage = (ev) => handleMidiMessage(ev.data)
+      settings.kbLast = portLabel(midiInput)
+      // a count chosen with no keyboard plugged in was meant for this one
+      if (settings.kbKeysFor[''] && !settings.kbKeysFor[kbLabel()]) settings.kbKeysFor[kbLabel()] = settings.kbKeysFor['']
+      delete settings.kbKeysFor['']
+      saveSettings()
+      if (!player) restoreKeysAt()
+    }
   }
-  if (output !== midiOutput) { midiOutput = output; litNotes.clear() }
+  if (output !== midiOutput) { clearNoteLights(); midiOutput = output; litNotes.clear() }
+  applyKeyCount()
+  fillKbPorts()
   updateKbChip()
   const detail = { connected: !!midiInput, name: midiInput ? midiInput.name : null }
   if (midiState && midiState.connected === detail.connected && midiState.name === detail.name) return
@@ -2987,21 +3074,21 @@ function updateKbChip() {
   if (!chip) return
   const connected = !!midiInput
   chip.classList.toggle('on', connected)
-  const lit = (daemon && daemon.ready) || (IS_WIN && !!midiOutput)
+  const lit = (daemon && daemon.ready) || (noteLightsOnly() && !!midiOutput)
   $('kbStatusText').textContent = connected ? (lit ? 'Keyboard connected' : 'Keyboard · lights off') : 'No keyboard'
-  if (IS_WIN) showWindowsLights()
+  if (noteLightsOnly()) showWindowsLights()
 }
 
-// Windows: Settings → Keyboard lights says how the keys light (there is no light service
+// Windows and the 49-key keyboard: Settings says how the keys light (there is no light service
 // to report on), and the brightness works only with a blocksd someone runs themselves.
 function showWindowsLights() {
   const ready = !!(daemon && daemon.ready)
   const el = $('daemonState')
-  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midi ? 'No keyboard found' : 'checking…'
+  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? 'No keyboard found' : 'checking…'
   const b = $('brightness')
   if (b) {
     b.disabled = !ready
-    b.title = ready ? '' : 'The keyboard sets its own brightness on Windows'
+    b.title = ready ? '' : 'The keyboard sets its own brightness'
   }
 }
 
@@ -3011,13 +3098,13 @@ function applyWindowsPage() {
   const set = (id, text) => { const el = $(id); if (el) el.textContent = text }
   set('lightsLabel', 'Key lights')
   set('recordTakesNote', 'Saves each run in the player as a video with Keylight’s sound to ' + TAKES_FOLDER + ', for making videos.')
-  set('importPrivacy', 'A recording becomes notes on your keys. MIDI and MusicXML files are read as written. Everything stays on ' + THIS_COMPUTER + '.')
+  set('importPrivacy', 'A recording becomes notes on ' + THIS_COMPUTER + ', and the file is never uploaded. MIDI and MusicXML files are read as written.')
   set('camHelp', 'Point a camera down at the keyboard. Keylight then shows which finger is over which key, before you press it.')
   showWindowsLights()
 }
 
 /* ============================== keyboard octave ============================== */
-// The Piano M's 24 keys play the notes kbBase()..kbBase()+23. The device octave
+// The keys play the notes kbBase()..kbBase()+kbKeys()-1. The device octave
 // (config OCTAVE = 4, range -4..5) moves that range. settings.kbZero is the note
 // the leftmost key plays at octave 0; it is learned from what the keys send, so
 // the lit key and the note the key plays can't drift apart.
@@ -3025,6 +3112,122 @@ let kbOctave = 0
 let kbSetAt = 0
 let octaveMiss = { offset: 0, pitches: [] }
 const kbBase = () => settings.kbZero + 12 * kbOctave
+
+// How many keys: 24 (Piano M, LUMI Keys) or 49 (ROLI Piano). Each keyboard keeps its own:
+// what the setup measured, Settings says or its notes showed (settings.kbKeysFor), else its
+// port's name: "ROLI Piano" without the M. Web MIDI gives nothing else to go on. With nothing
+// plugged in the last keyboard's count holds, so unplugging doesn't redraw a song.
+const KB_SIZES = [24, 49]
+const portLabel = (p) => ((p.manufacturer || '') + ' ' + (p.name || '')).trim()
+const kbLabel = () => (midiInput ? portLabel(midiInput) : settings.kbLast)
+const keysFromName = (label) => (/\broli piano\b(?!\s*m\b)/i.test(label) ? 49 : 24)
+const kbKeys = () => settings.kbKeysFor[kbLabel()] || keysFromName(kbLabel())
+// blocksd only drives the 24-key keyboards, so a longer one lights from MIDI notes, as on Windows
+const noteLightsOnly = () => IS_WIN || kbKeys() > 24
+
+// A long keyboard, which the app can't move or ask: the screen always shows where its keys are,
+// as last seen for that keyboard. (24 keys off the light service fit each song instead: a note
+// off so few keys soon shows where they really are.)
+const keysAt = () => settings.kbBaseFor[kbLabel()] ?? settings.kbZero
+const keysStayAt = () => (kbKeys() > 24 && !(daemon && daemon.ready) ? keysAt() : null)
+function rememberKeysAt() {
+  if (keysStayAt() == null) return
+  settings.kbBaseFor[kbLabel()] = kbBase()
+  saveSettings()
+}
+function restoreKeysAt() {
+  if (keysStayAt() != null) kbOctave = Math.round((keysAt() - settings.kbZero) / 12)
+}
+// The notes a long keyboard can't reach from where it is, said once the song's own message
+// has had its moment.
+function hintOffKeys(s, stay) {
+  const keys = kbKeys()
+  const low = s.notes.filter((n) => n.pitch < stay).length, high = s.notes.filter((n) => n.pitch >= stay + keys).length
+  const n = low + high
+  if (!n) return
+  setTimeout(() => {
+    if (song === s) status((n === s.notes.length ? 'This whole song sits ' : n === 1 ? '1 note sits ' : n + ' notes sit ') + (high > low ? 'above' : 'below') + ' your keys. Use the octave buttons on your keyboard to reach ' + (n === 1 ? 'it' : 'them'))
+  }, 1600)
+}
+// The window moved on a long keyboard: a hand left with nothing on the keys falls back to both.
+function recheckHands() {
+  if (!player || !song || keysStayAt() == null) return
+  song.handCounts = player.handCounts()
+  const hand = player.handFilter
+  if (hand === 'both' || song.handCounts[hand]) return
+  player.setHandFilter('both')
+  syncHudButtons()
+  status(noHandPart(hand))
+}
+
+// The setup measured the keyboard. A count that a telling port name already gives isn't stored,
+// so that name keeps deciding; on a nameless port the measurement is all there is.
+function learnKeyCount(keys) {
+  const label = kbLabel()
+  if (keys === keysFromName(label) && (keys > 24 || KB_PORT.test(label))) delete settings.kbKeysFor[label]
+  else settings.kbKeysFor[label] = keys
+  if (!player) rememberKeysAt()     // going long: the keys are where the app last followed them
+  saveSettings()
+  applyKeyCount()
+}
+
+// A keyboard whose name doesn't say how long it is shows it by playing: notes more than 24 keys
+// apart, pressed together, can't come from 24 keys. Twice within a few seconds, so that a quick
+// press of an octave button between notes doesn't decide it. One named for the 24-key keyboards
+// never gets here.
+const NOTES_TOGETHER_MS = 700, FAR_AGAIN_MS = 15000
+const pressedAt = new Map()     // pitch -> when it was last pressed
+let lastFarAt = -Infinity
+function learnLengthFromNotes(pitch) {
+  const now = performance.now()
+  const far = [...pressedAt].filter(([p, at]) => now - at < NOTES_TOGETHER_MS && Math.abs(p - pitch) > 24).map(([p]) => p)
+  pressedAt.set(pitch, now)
+  if (!far.length || !midiInput || (daemon && daemon.ready) || settings.kbKeysFor[kbLabel()] || kbKeys() > 24 || KB_PORT.test(kbLabel())) return
+  const gap = now - lastFarAt
+  if (gap < NOTES_TOGETHER_MS) return     // still the same moment
+  lastFarAt = now
+  if (gap > FAR_AGAIN_MS) return          // the first time, or long ago
+  learnKeyCount(49)
+  // both notes belong on the screen
+  const lo = Math.min(pitch, ...far), hi = Math.max(pitch, ...far)
+  if (lo < kbBase() || hi >= kbBase() + 49) recalibrate(Math.floor(lo / 12) * 12 - kbBase(), 'notes ' + lo + ' and ' + hi + ' together')
+  rememberKeysAt()
+  status('Your keyboard has more than 24 keys, so the screen now shows 49. Settings can change this')
+}
+
+// Everything that follows the number of keys: the keyboard on screen and in the setup, the
+// song's window and the wording.
+function applyKeyCount() {
+  const keys = kbKeys()
+  setKeyCount(keys)
+  if (player && player.windowKeys !== keys) {
+    player.setWindowKeys(keys, keysStayAt())
+    if (song) {
+      song.fitStart = player.windowStart
+      setKeyboardWindow(song.fitStart)
+      song.handCounts = player.handCounts()
+      if (keysStayAt() != null) hintOffKeys(song, player.windowStart)
+      recheckHands()
+    }
+  }
+  const box = $('obKeys')
+  const whites = keys === 49 ? 29 : 14
+  if (box.children.length !== whites || !box.style.length) {
+    box.replaceChildren(...Array.from({ length: whites }, (_, i) => { const k = document.createElement('i'); k.style.setProperty('--i', i); return k }))
+    box.style.setProperty('--white-keys', whites)
+    box.classList.toggle('long', keys > 24)
+    setup.glow = new Array(whites).fill(0)
+  }
+  $('kbKeys').value = String(settings.kbKeysFor[kbLabel()] || 0)
+  $('kbKeys').options[0].textContent = 'Automatic (' + keysFromName(kbLabel()) + ' keys)'
+  if (!IS_WIN) {
+    $('lightsLabel').textContent = noteLightsOnly() ? 'Key lights' : 'Light service'
+    if (!noteLightsOnly()) { $('brightness').disabled = false; $('brightness').title = ''; showDaemonState() }
+  }
+  syncOctaveUI()
+  updateKbChip()      // also the lights row, while it follows the keyboard
+  renderSetup()
+}
 
 function setKeyboardWindow(start) {
   kbOctave = Math.max(-4, Math.min(5, Math.round((start - settings.kbZero) / 12)))
@@ -3043,7 +3246,18 @@ function setKeyboardWindow(start) {
 function shiftOctave(delta) {
   // without the light service the app can't move the keyboard's octave, only follow it
   if (!daemon || !daemon.ready) {
-    status(IS_WIN ? 'Use the octave buttons on your keyboard to move the keys: Keylight follows them'
+    // a long keyboard seldom plays a note off the screen, so this is how to line the screen up with it
+    if (kbKeys() > 24) {
+      const to = kbBase() + 12 * delta
+      if (to < 0 || to + kbKeys() - 1 > 127) { status('The screen is already at its ' + (delta < 0 ? 'lowest' : 'highest') + ' octave'); return }
+      const hand = player && player.handFilter
+      recalibrate(12 * delta, 'octave ' + (delta < 0 ? 'down' : 'up') + ' on the screen')
+      if (song) song.fitStart = kbBase()
+      // (if your hand just went off the keys, recheckHands has said so)
+      if (!player || player.handFilter === hand) status('The screen now shows ' + keysRange() + '. To move the keys themselves, use the octave buttons on your keyboard')
+      return
+    }
+    status(noteLightsOnly() ? 'Use the octave buttons on your keyboard to move the keys: Keylight follows them'
       : 'Moving the keys from here needs the light service: use the octave buttons on your keyboard')
     return
   }
@@ -3053,7 +3267,7 @@ function shiftOctave(delta) {
   if (song) song.fitStart = kbBase()
   octaveSweepAt = performance.now()
   octaveSweepDir = Math.sign(delta)
-  status('Keys now play ' + noteName(kbBase()) + '–' + noteName(kbBase() + 23))
+  status('Keys now play ' + keysRange())
 }
 
 // The range the keys play, wherever it shows: the HUD's Octave control and Settings
@@ -3070,9 +3284,12 @@ function syncOctaveUI() {
 function recalibrate(shift, reason) {
   if (!daemon || !daemon.ready) {
     // We can't move the keyboard's octave right now, so we don't know it either:
-    // follow the keys for this session without saving a calibration.
+    // follow the keys without saving a calibration.
+    if (kbBase() + shift < 0) return
     kbOctave += shift / 12
+    rememberKeysAt()
     if (player) player.setWindowStart(kbBase())
+    recheckHands()
     syncOctaveUI()
     console.log('KEYBOARD following keys base=' + kbBase() + ' (' + reason + ', light service offline)')
     return
@@ -3086,12 +3303,13 @@ function recalibrate(shift, reason) {
 // A note outside the window can only mean the range is wrong.
 function calibrateFromNote(pitch) {
   const base = kbBase()
-  if (pitch >= base && pitch < base + 24) return
+  const keys = kbKeys()
+  if (pitch >= base && pitch < base + keys) return
   if (performance.now() - kbSetAt < 700) return     // octave change still landing
   let nb = base
   while (pitch < nb) nb -= 12
-  while (pitch >= nb + 24) nb += 12
-  recalibrate(nb - base, 'note ' + pitch + ' outside ' + base + '-' + (base + 23))
+  while (pitch >= nb + keys) nb += 12
+  recalibrate(nb - base, 'note ' + pitch + ' outside ' + base + '-' + (base + keys - 1))
 }
 
 // Inside the window but exactly an octave away from what practice waits for, on
@@ -3104,23 +3322,28 @@ function checkOctaveMismatch(pitch, need) {
   if (octaveMiss.offset !== offset) octaveMiss = { offset, pitches: [], presses: 0 }
   if (!octaveMiss.pitches.includes(pitch)) octaveMiss.pitches.push(pitch)
   octaveMiss.presses = (octaveMiss.presses || 0) + 1
-  // two different notes, or (when only one note is wanted) the same one three times
-  if (octaveMiss.pitches.length >= 2 || (need.size === 1 && octaveMiss.presses >= 3)) {
-    status('Your keys seemed an octave off, so I moved them')
+  // two different notes, or (when only one note is wanted) the same one three times. A long
+  // keyboard has an octave-off key within easy reach of a plain slip, so it takes one press more.
+  const more = kbKeys() > 24 ? 1 : 0
+  if ((octaveMiss.pitches.length >= 2 && octaveMiss.presses >= 2 + more) || (need.size === 1 && octaveMiss.presses >= 3 + more)) {
+    status(daemon && daemon.ready ? 'Your keys seemed an octave off, so I moved them' : 'Your keys seemed an octave off, so I moved the screen to match')
     octaveMiss = { offset: 0, pitches: [] }
     recalibrate(offset, 'two different notes played an octave ' + (offset > 0 ? 'above' : 'below') + ' the target')
   }
 }
 
 /* ============================== LED daemon ============================== */
+function showDaemonState() {
+  const el = $('daemonState'), state = daemonState
+  // a refused frame still means the service is there
+  if (el) el.textContent = state === 'connected' || state === 'rejected' ? 'Connected' : state === 'no-device' ? 'Running, no keyboard found'
+    : state === 'unavailable' || state === 'disconnected' ? 'Not running' : state === 'checking' ? 'checking…' : state
+}
 function initDaemon() {
   daemon = new LedDaemon((state, info, device) => {
     if (state === 'info') { showKeyboardInfo(info); return }   // a battery update from the same keyboard
     daemonState = state
-    const el = $('daemonState')
-    // a refused frame still means the service is there
-    if (el) el.textContent = state === 'connected' || state === 'rejected' ? 'Connected' : state === 'no-device' ? 'Running, no keyboard found'
-      : state === 'unavailable' || state === 'disconnected' ? 'Not running' : state
+    showDaemonState()
     updateKbChip()
     if (state !== 'rejected') showKeyboardInfo(state === 'connected' ? device : null)
     if (state === 'connected') {
@@ -3856,7 +4079,7 @@ async function runSelfTest() {
       calibrateFromNote(played)
       const nb = settings.kbZero + 12 * savedOct
       console.log(`SELFTEST calibrate played=${played} oldBase=${before} newBaseAtSameOctave=${nb} contains=${played >= nb && played < nb + 24}`)
-      settings.kbZero = savedZero; saveSettings()
+      settings.kbZero = savedZero; settings.kbBaseFor = {}; saveSettings()
       setKeyboardWindow(savedZero + 12 * savedOct)
     }
     const before = litNotes.size
@@ -4299,6 +4522,374 @@ async function runSelfTest() {
       for (const t of [100.1, 101.0, 102.0, 102.4, 102.41, 102.6, 103.0, 103.5]) { clk.currentTime = t; sch.pump(pb, { ctx: clk, accompany: true, watchSynth: true, band: null }) }
       const count = (list, t) => list.filter((x) => Math.abs(x - (100.1 + t)) < 1e-6).length
       console.log(`SELFTEST engine scheduler boundary note2.5=x${count(notesAt, 2.5)} click2.5=x${count(clicksAt, 2.5)} notes=${notesAt.length} clicks=${clicksAt.length} (expect x1 x1 8 6)`)
+    }
+
+    // Other keyboards: choosing the port, the 49-key ROLI Piano, a MIDI file. Songs opened here
+    // would move a real keyboard through blocksd, so this runs only off it (scripts/selftest.js).
+    if (daemon) console.log('SELFTEST keyboards skipped: the light service is in use')
+    else {
+      const check = (what, ok, got = '') => console.log(`SELFTEST keyboards ${what} ${ok ? 'ok' : 'FAIL'}${got !== '' ? ' got=' + got : ''}`)
+      const port = (name, state = 'connected') => ({ name, state, manufacturer: '' })
+      const names = (r) => (r.input ? r.input.name : '-') + '/' + (r.output ? r.output.name : '-')
+      const pick = (ins, outs, choice) => names(pickPorts(ins.map((n) => port(n)), outs.map((n) => port(n)), choice))
+      let got = pick(['Loopback', 'USBMidi2-ACX'], ['Loopback', 'USBMidi2-ACX'])
+      check('auto skips a loopback', got === 'USBMidi2-ACX/-', got)
+      got = pick(['LoopBe Internal MIDI', 'ROLI Piano'], ['LoopBe Internal MIDI', 'ROLI Piano'])
+      check('auto finds the piano', got === 'ROLI Piano/ROLI Piano', got)
+      got = pick(['Loopback', 'USBMidi2-ACX'], ['Loopback', 'USBMidi2-ACX'], 'USBMidi2-ACX')
+      check('choice lights its own output', got === 'USBMidi2-ACX/USBMidi2-ACX', got)
+      got = pick(['Casio', 'LUMI Keys BLOCK'], ['Casio', 'LUMI Keys BLOCK'], 'Casio')
+      check('choice plays no light notes on a synth', got === 'Casio/LUMI Keys BLOCK', got)
+      got = pick(['Loopback', 'LUMI Keys BLOCK'], ['LUMI Keys BLOCK'], 'ROLI Piano')
+      check('choice unplugged waits', got === '-/-', got)
+      got = names(pickPorts([port('ROLI Piano', 'disconnected'), port('Casio')], [], 'ROLI Piano'))
+      check('choice disconnected waits', got === '-/-', got)
+      check('names', [['ROLI Piano', 49], ['ROLI ROLI Piano', 49], ['ROLI Piano M', 24], ['LUMI Keys BLOCK', 24], ['Piano M', 24], ['USBMidi2-ACX', 24]].every(([n, k]) => keysFromName(n) === k))
+
+      const end = (low, p, base) => JSON.stringify(readEndKeys(low, p, base))
+      check('end keys 24', end(48, 71, 48) === '{"done":true,"shift":0,"keys":24}', end(48, 71, 48))
+      check('end keys 49', end(36, 84, 48) === '{"done":true,"shift":-12,"keys":49}', end(36, 84, 48))
+      check('end keys wrong', end(48, 72, 48) === '{"low":72}' && end(null, 50, 48) === '{"low":null,"wrong":50}', end(48, 72, 48))
+
+      const mk = (ps) => ps.map((pitch, i) => ({ pitch, start: i, dur: 0.5, vel: 100, hand: pitch < 60 ? 'left' : 'right' }))
+      const span = mk([36, 48, 60, 72, 84])
+      check('fit 49 whole span', fitWindow(span, 49) === 36, fitWindow(span, 49))
+      check('fit 24 unchanged', fitWindow(mk([60, 62, 64])) === 48 || fitWindow(mk([60, 62, 64])) === 60, fitWindow(mk([60, 62, 64])))
+      const parted = { notes: span, duration: 6, windows: [{ at: 0 }, { at: 2 }] }
+      const p49 = new Player({ getCtx: audioContext })
+      p49.windowKeys = 49
+      p49.load(parted)
+      const p24 = new Player({ getCtx: audioContext })
+      p24.load(parted)
+      check('window parts', !p49._parts && !!p24._parts && p49.playableNotes().length === 5)
+
+      const saved = { keysFor: settings.kbKeysFor, baseFor: settings.kbBaseFor, last: settings.kbLast, pick: settings.kbPort, zero: settings.kbZero, oct: kbOctave, set: kbSetAt, input: midiInput, output: midiOutput, midi, player, song, step: setup.step }
+      // real MIDI bytes through ports the app binds as it would real ones: nothing here reaches a keyboard
+      const fakePort = (name) => ({ name, manufacturer: '', state: 'connected', sent: [], onmidimessage: null, send(m) { this.sent.push(m) } })
+      const plug = (...names) => {
+        midi = { inputs: new Map(names.map((n) => [n, fakePort(n)])), outputs: new Map(names.map((n) => [n, fakePort(n)])) }
+        bindMidiPorts()
+        return midi
+      }
+      const on = (p) => midi.inputs.get(midiInput.name).onmidimessage({ data: new Uint8Array([0x90, p, 100]) })
+      const off = (p) => midi.inputs.get(midiInput.name).onmidimessage({ data: new Uint8Array([0x80, p, 0]) })
+      const tap = (p) => { on(p); off(p) }
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+      const fresh = () => {
+        Object.assign(settings, { kbKeysFor: {}, kbBaseFor: {}, kbLast: '', kbPort: '', kbZero: 48 })
+        kbOctave = 0; kbSetAt = 0; midiInput = null; midiOutput = null; player = null; song = null
+        held.clear(); letGoAt.clear(); pressedAt.clear(); lastFarAt = -Infinity; octaveMiss = { offset: 0, pitches: [] }
+      }
+      const musicNotes = mk([60, 62, 64, 65, 67, 69, 71, 72, 74, 76])
+      const open = (notes = musicNotes) => {
+        song = { title: 'Test', artist: '', file: 'selftest-keys.xml', tempo: 120, duration: 12, notes: notes.map((n) => ({ ...n })) }
+        player = new Player({ getCtx: audioContext })
+        loadIntoPlayer(song)
+      }
+      try {
+        // The reporter's case: setup long since skipped, the keyboard called "USBMidi2-ACX" next to a loopback
+        fresh()
+        plug('Loopback', 'USBMidi2-ACX')
+        check('skipped setup binds the piano, no lights yet', midiInput.name === 'USBMidi2-ACX' && !midiOutput && kbKeys() === 24 && (!IS_WIN || setupLightsState() === 'no-light-port') && canChooseLights(), setupLightsState())
+        check('no "no keyboard found" for a keyboard that plays', !IS_WIN || $('daemonState').textContent === 'Off: choose your keyboard below', $('daemonState').textContent)
+        tap(36)
+        await wait(NOTES_TOGETHER_MS + 100)
+        tap(84)
+        await wait(NOTES_TOGETHER_MS + 100)
+        tap(36)
+        check('notes far apart in time don\'t decide', kbKeys() === 24, kbKeys())
+        fresh()
+        plug('Loopback', 'USBMidi2-ACX')
+        on(36); on(84); off(36); off(84)
+        check('one pair doesn\'t decide', kbKeys() === 24, kbKeys())
+        await wait(NOTES_TOGETHER_MS + 100)
+        on(36); on(84); off(36); off(84)
+        got = keysRange()
+        check('a second pair teaches 49', kbKeys() === 49 && settings.kbKeysFor['USBMidi2-ACX'] === 49 && got === 'C2–C6', got)
+        check('49 keys alone earn no light notes', !midiOutput)
+        settings.kbPort = 'USBMidi2-ACX'
+        bindMidiPorts()
+        check('choosing it by name does', midiOutput && midiOutput.name === 'USBMidi2-ACX' && !canChooseLights())
+        kbSetAt = 0
+        for (const p of [36, 84, 60, 84, 36, 83]) tap(p)
+        check('both ends no longer flip the window', kbBase() === 36, kbBase())
+
+        // What must not teach it: a 25-key C to C; a key held across an octave press; a 24-key name
+        fresh()
+        plug('MPK mini')
+        for (let i = 0; i < 2; i++) { on(48); on(72); off(48); off(72); await wait(NOTES_TOGETHER_MS + 20) }
+        check('both ends of 25 keys stay 25-ish', kbKeys() === 24, kbKeys())
+        fresh()
+        plug('USBMidi2-ACX')
+        on(48)
+        await wait(NOTES_TOGETHER_MS + 100)
+        tap(84)
+        await wait(NOTES_TOGETHER_MS + 100)
+        tap(84)
+        off(48)
+        check('a key held across octave presses doesn\'t teach it', kbKeys() === 24, kbKeys())
+        fresh()
+        plug('USBMidi2-ACX')
+        tap(50)
+        await wait(500)     // the octave button
+        tap(76); tap(79)
+        check('one octave press with a chord after it doesn\'t teach it', kbKeys() === 24, kbKeys())
+        fresh()
+        plug('USBMidi2-ACX')
+        lastFarAt = performance.now() - FAR_AGAIN_MS - 1000
+        tap(36); tap(84)
+        check('a far pair long ago doesn\'t add up', kbKeys() === 24, kbKeys())
+        fresh()
+        plug('LUMI Keys BLOCK')
+        for (let i = 0; i < 3; i++) { on(48); on(84); off(48); off(84); await wait(NOTES_TOGETHER_MS + 20) }
+        check('a named 24-key keyboard never grows', kbKeys() === 24 && !settings.kbKeysFor['LUMI Keys BLOCK'], kbKeys())
+        fresh()
+        plug('USBMidi2-ACX')
+        learnKeyCount(24)
+        for (let i = 0; i < 2; i++) { on(48); on(84); off(48); off(84); await wait(NOTES_TOGETHER_MS + 20) }
+        check('a measured 24 sticks on a nameless port', kbKeys() === 24 && settings.kbKeysFor['USBMidi2-ACX'] === 24, kbKeys())
+        fresh()
+        plug('LUMI Keys BLOCK')
+        learnKeyCount(24)
+        check('a telling name stores nothing', !('LUMI Keys BLOCK' in settings.kbKeysFor))
+
+        // 24 keys fit each song as they always did
+        fresh()
+        plug('LUMI Keys BLOCK')
+        check('24 keys never stay put', keysStayAt() === null, keysStayAt())
+        open(mk([72, 74, 76, 77, 79]))
+        check('24 keys still fit the song', player.windowStart === fitWindow(song.notes) && kbBase() === player.windowStart, player.windowStart)
+
+        // A restart remembers where the keys were and how many, before the keyboard is even on
+        fresh()
+        plug('USBMidi2-ACX')
+        on(36); on(84); off(36); off(84)
+        await wait(NOTES_TOGETHER_MS + 100)
+        on(36); on(84); off(36); off(84)
+        midi = null; midiInput = null; midiOutput = null; kbOctave = 0
+        restoreKeysAt()
+        check('restart keeps length and position', kbKeys() === 49 && kbBase() === 36, kbKeys() + ' keys at ' + kbBase())
+        applyKeyCount()
+        check('restart screen has 49', $('obKeys').children.length === 29)
+        open()
+        check('a song stays on the keys', player.windowKeys === 49 && player.windowStart === 36 && kbBase() === 36, player.windowStart)
+        open(mk([60, 72, 84, 85, 90, 96]))
+        check('even a song that fits better higher', player.windowStart === 36 && kbBase() === 36 && player.accompanimentNotes().length === 3, player.windowStart)
+        const parts = { title: 'Test', artist: '', file: 'selftest-keys.xml', duration: 12, notes: mk([36, 96]), windows: [{ at: 0 }, { at: 1 }] }
+        song = parts
+        loadIntoPlayer(song)
+        check('and a song in parts doesn\'t move it', !player._parts && player.windowAt(5) === 36)
+
+        // What a long keyboard says about notes off its keys, and hands left with nothing to play
+        fresh()
+        settings.kbKeysFor[''] = 49
+        kbOctave = -1
+        rememberKeysAt()
+        applyKeyCount()
+        open(mk([48, 50, 60, 62, 96]))
+        await wait(1700)
+        got = $('status').textContent
+        check('notes off the keys are mentioned', /^1 note sits above your keys/.test(got), got)
+        player.setHandFilter('left')
+        shiftOctave(1)
+        check('a hand still on the keys stays', player.handFilter === 'left' && kbBase() === 48, player.handFilter)
+        shiftOctave(1)
+        got = $('status').textContent
+        check('a hand off the keys falls back to both', player.handFilter === 'both' && got === 'The left-hand part is off your keys: use the octave buttons on your keyboard', got)
+        check('a hand the song hasn\'t got is still that', noHandPart('right') !== noHandPart('left') || song.notes.every((n) => n.hand !== 'right'))
+        // none of the song on the keys: no verdict on the playing, and a lesson step isn't done
+        const before = !$('results').classList.contains('hidden')
+        onFinish({ mode: 'PRACTISE', totalNotes: 0, starRating: 0, overallAccuracy: 0 })
+        got = $('status').textContent
+        check('no notes on the keys gives no results', !before && $('results').classList.contains('hidden') && /^None of this song/.test(got), got)
+        // Settings: going long keeps where the keys were last followed
+        fresh()
+        kbOctave = -1
+        $('kbKeys').value = '49'
+        $('kbKeys').onchange({ target: $('kbKeys') })
+        check('choosing 49 keeps the keys where they are', kbKeys() === 49 && keysAt() === 36 && kbBase() === 36, keysAt())
+        check('no brand names in the list', !/roli|lumi|piano m/i.test($('kbKeys').textContent), $('kbKeys').textContent)
+
+        // Unplugged and back: nothing redraws, nothing is lost
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(36)
+        open()
+        const start = player.windowStart
+        check('a port named ROLI Piano is 49 and follows', kbKeys() === 49 && start === 36, start)
+        midi.inputs.get('ROLI Piano').state = 'disconnected'
+        midi.outputs.get('ROLI Piano').state = 'disconnected'
+        bindMidiPorts()
+        check('unplugged keeps 49', !midiInput && kbKeys() === 49 && player.windowKeys === 49 && player.windowStart === start)
+        plug('ROLI Piano')
+        check('replugged keeps the window', kbKeys() === 49 && player.windowStart === start && kbBase() === start, player.windowStart)
+
+        // Choosing a port: remembered, waits when unplugged, each keyboard keeps its own count
+        fresh()
+        settings.kbPort = 'USBMidi2-ACX'
+        plug('LUMI Keys BLOCK')
+        check('choice unplugged: nobody else takes over', !midiInput && !midiOutput)
+        fillKbPorts()
+        check('choice unplugged is listed', [...$('kbPort').options].some((o) => o.value === 'USBMidi2-ACX' && /not connected/.test(o.textContent)) && $('kbPort').value === 'USBMidi2-ACX')
+        plug('LUMI Keys BLOCK', 'USBMidi2-ACX')
+        check('choice replugged binds and lights', midiInput.name === 'USBMidi2-ACX' && midiOutput.name === 'USBMidi2-ACX')
+        learnKeyCount(49)
+        settings.kbPort = 'LUMI Keys BLOCK'
+        bindMidiPorts()
+        check('another keyboard goes by its own count', kbKeys() === 24 && settings.kbKeysFor['USBMidi2-ACX'] === 49, kbKeys())
+        settings.kbPort = 'USBMidi2-ACX'
+        bindMidiPorts()
+        check('and back', kbKeys() === 49)
+        on(60)
+        midi.inputs.get('USBMidi2-ACX').onmidimessage({ data: new Uint8Array([0xb0, 64, 127]) })
+        settings.kbPort = 'LUMI Keys BLOCK'
+        bindMidiPorts()
+        check('switching input lets go of keys and pedal', held.size === 0 && !sustainDown())
+        check('settings list counts the keyboard', $('kbKeys').value === '0' && /24/.test($('kbKeys').options[0].textContent), $('kbKeys').value)
+        fresh()
+        settings.kbKeysFor[''] = 49
+        plug('USBMidi2-ACX')
+        check('a count chosen before plugging in carries over', kbKeys() === 49 && settings.kbKeysFor['USBMidi2-ACX'] === 49 && !('' in settings.kbKeysFor))
+        fresh()
+        plug('Casio USB MIDI')
+        check('a keyboard that can\'t light says so', !IS_WIN || (!midiOutput && !canChooseLights() && $('daemonState').textContent === 'Off for this keyboard'), $('daemonState').textContent)
+
+        // Setup on a keyboard with no name to go by, with a song already open
+        fresh()
+        plug('USBMidi2-ACX')
+        open()
+        Object.assign(setup, { step: SETUP_STEPS.indexOf('keyboard'), lowKey: null, wrongKey: null, rangeDone: false })
+        kbSetAt = 0
+        for (const p of [36, 84]) { calibrateFromNote(p); onSetupKey(p) }
+        got = keysRange()
+        check('setup learns 49', setup.rangeDone && kbKeys() === 49 && settings.kbKeysFor['USBMidi2-ACX'] === 49 && got === 'C2–C6' && settings.kbBaseFor['USBMidi2-ACX'] === 36 && player.windowStart === 36, got)
+        check('screen has 49', $('obKeys').children.length === 29 && $('obKeys').classList.contains('long'))
+        const base = kbBase()
+        kbSetAt = 0      // past the moment an octave change is still landing
+        for (const p of [36, 84, 60, 84, 36, 83]) calibrateFromNote(p)
+        check('both ends don\'t move the window', kbBase() === base && base === 36, kbBase())
+        calibrateFromNote(96)
+        check('octave button still followed', kbBase() === 48 && settings.kbBaseFor['USBMidi2-ACX'] === 48, kbBase())
+        shiftOctave(-1)
+        check('− lines the screen up', kbBase() === 36 && settings.kbBaseFor['USBMidi2-ACX'] === 36 && player.windowStart === 36, kbBase())
+        for (let i = 0; i < 8; i++) shiftOctave(-1)
+        check('− stops at the lowest note', kbBase() === 0, kbBase())
+        for (let i = 0; i < 12; i++) shiftOctave(1)
+        check('+ stops at the highest note', kbBase() + 48 <= 127 && kbBase() + 60 > 127, kbBase())
+        Object.assign(setup, { lowKey: null, rangeDone: false })
+
+        // Octave-off notes: a plain slip doesn't move a long keyboard's screen, a real shift does
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(36)
+        open()
+        octaveMiss = { offset: 0, pitches: [] }
+        const wanted = new Set([72])
+        checkOctaveMismatch(60, wanted); checkOctaveMismatch(60, wanted); checkOctaveMismatch(60, wanted)
+        check('three slips on one key stay put', kbBase() === 36, kbBase())
+        checkOctaveMismatch(60, wanted)
+        check('a fourth moves the screen', kbBase() === 24, kbBase())
+        // a chord has only two octave-off notes to give
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(48)
+        const chord = new Set([60, 64])
+        checkOctaveMismatch(72, chord); checkOctaveMismatch(76, chord)
+        check('two presses of a chord stay put', kbBase() === 48, kbBase())
+        checkOctaveMismatch(72, chord)
+        check('the third follows the keys', kbBase() === 60, kbBase())
+        // and in Play, through the real note path, with the song running on a test clock
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(36)
+        const clk = { currentTime: 100, state: 'running', baseLatency: 0, outputLatency: 0 }
+        song = { title: 'Test', artist: '', file: 'selftest-keys.xml', tempo: 120, duration: 40, notes: [72, 74, 76, 77, 79, 81].map((pitch, i) => ({ pitch, start: i * 2, dur: 1.8, vel: 90, hand: 'right' })) }
+        player = new Player({ getCtx: () => clk })
+        loadIntoPlayer(song)
+        player.setMode('PLAY'); player.setCountIn(0); player.play()
+        for (let i = 0; i < 3; i++) { clk.currentTime = 100.2 + i * 2; player.tick(); tap(song.notes[i].pitch - 12) }
+        check('Play notices the keys moved', kbBase() === 24, kbBase())
+        player.pause()
+        // notes the keys can't reach don't count: someone playing along an octave down is fine
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(36)
+        clk.currentTime = 200
+        song = { title: 'Test', artist: '', file: 'selftest-keys.xml', tempo: 120, duration: 40, notes: [88, 89, 90, 91, 92, 93].map((pitch, i) => ({ pitch, start: i * 2, dur: 1.8, vel: 90, hand: 'right' })) }
+        player = new Player({ getCtx: () => clk })
+        loadIntoPlayer(song)
+        player.setMode('PLAY'); player.setCountIn(0); player.play()
+        for (let i = 0; i < 3; i++) { clk.currentTime = 200.2 + i * 2; player.tick(); tap(song.notes[i].pitch - 12) }
+        check('notes off the keys don\'t move the screen', kbBase() === 36, kbBase())
+        player.pause()
+        // a press that hits its note clears the count
+        fresh()
+        plug('ROLI Piano')
+        kbSetAt = 0
+        tap(36)
+        checkOctaveMismatch(60, wanted); checkOctaveMismatch(62, new Set([74]))
+        checkOctaveMismatch(72, wanted)
+        check('a right note clears the count', octaveMiss.pitches.length === 0 && kbBase() === 36)
+
+        fresh()
+        settings.kbKeysFor[''] = 49
+        applyKeyCount()
+        const sent = [], fake = { send: (m) => sent.push(m) }
+        const ms = midiLightSweep(fake)
+        await new Promise((r) => setTimeout(r, ms + 150))
+        const count = new Map()
+        for (const [st, p] of sent) count.set(p, (count.get(p) || 0) + (st === 0x90 ? 1 : -1))
+        check('light sweep covers 49', count.size === 49 && [...count.values()].every((c) => c === 0) && ms < 1600, count.size + ' keys, ' + ms + ' ms')
+
+        for (const view of ['CASCADE', 'RAINBOW', 'COLORNOTE', 'CLASSIC']) {
+          const c = document.createElement('canvas')
+          c.width = 1280; c.height = 720
+          const notes = mk([36, 37, 60, 83, 84]).map((n) => ({ ...n, start: n.start * 0.2 + 0.2 }))
+          const geo = drawScene(c.getContext('2d'), 1280, 720, { view, noteLabels: 'names', windowStart: 36, notes, position: 0, activeNotes: [], upcomingNotes: [], held: new Set([36, 84]), needPitches: new Set() })
+          const inOrder = geo.keys.every((k, i) => k.pitch === 36 + i && (i === 0 || k.lx0 > geo.keys[i - 1].lx0))
+          const ends = geo.keyAt(geo.keys[0].cx) === 0 && geo.keyAt(geo.keys[48].cx) === 48
+          const onCanvas = geo.keys[0].x >= 0 && geo.keys[48].x + geo.keys[48].w <= 1280
+          check('view ' + view, geo.keys.length === 49 && geo.keyCount === 49 && inOrder && ends && onCanvas)
+        }
+      } finally {
+        Object.assign(settings, { kbKeysFor: saved.keysFor, kbBaseFor: saved.baseFor, kbLast: saved.last, kbPort: saved.pick, kbZero: saved.zero })
+        kbOctave = saved.oct
+        kbSetAt = saved.set
+        midi = saved.midi
+        midiInput = saved.input
+        midiOutput = saved.output
+        player = saved.player
+        song = saved.song
+        held.clear(); letGoAt.clear(); pressedAt.clear(); lastFarAt = -Infinity; setSustain(false)
+        octaveMiss = { offset: 0, pitches: [] }
+        Object.assign(setup, { step: saved.step, lowKey: null, wrongKey: null, rangeDone: false })
+        saveSettings()
+        applyKeyCount()
+        fillKbPorts()
+      }
+      check('Settings still reads a real state', IS_WIN || $('daemonState').textContent === 'checking…', $('daemonState').textContent)
+      check('back to 24', kbKeys() === 24 && drawScene(document.createElement('canvas').getContext('2d'), 800, 400, { view: 'CASCADE', windowStart: 48, notes: [] }).keys.length === 24)
+
+      // a MIDI file through the same import as the Add a song sheet: two tracks, one per hand
+      const vlq0 = [0]
+      const track = (notes) => {
+        const ev = []
+        for (const p of notes) ev.push(...vlq0, 0x90, p, 90, 0x83, 0x60, 0x80, p, 0)
+        ev.push(...vlq0, 0xff, 0x2f, 0)
+        return [0x4d, 0x54, 0x72, 0x6b, 0, 0, ev.length >> 8, ev.length & 255, ...ev]
+      }
+      const smf = new Uint8Array([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 1, 0xe0, ...track([60, 64, 67, 72]), ...track([36, 43])])
+      for (const name of ['Someone - Test Song.mid', 'Someone - Test Song.midi']) {
+        const imp = await importFile(new File([smf], name), { lookup: false })
+        const song = imp.song || imp
+        const ps = song.notes.map((n) => n.pitch + (n.hand === 'left' ? 'L' : 'R')).sort().join(',')
+        check('midi file ' + name.split('.').pop(), ps === '36L,43L,60R,64R,67R,72R' && /Test Song/.test(song.title), ps + ' title=' + song.title)
+      }
     }
 
     console.log('SELFTEST done')

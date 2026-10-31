@@ -1,4 +1,4 @@
-// Player canvas renderer: falling notes over the 24-key keyboard.
+// Player canvas renderer: falling notes over the keyboard (24 keys, or 49 on the ROLI Piano).
 //   CASCADE   - the keyboard as a 3D object seen from above and in front; the notes ride a plane
 //               that recedes behind it towards a vanishing point above the top edge. Hand colours.
 //   RAINBOW   - CASCADE, a vivid hue per pitch
@@ -183,7 +183,7 @@ function keyTones() {
 keyTones()
 
 /* --------------------------------------------------------- keyboard layout */
-const NKEYS = 24
+const MAX_KEYS = 49
 const IS_BLACK = [false, true, false, true, false, false, true, false, true, false, true, false]
 // Black-key centre offset from the white-key boundary it sits on, in white-key widths (real piano spacing).
 const BLACK_SHIFT = [0, -0.08, 0, 0.08, 0, 0, -0.1, 0, 0, 0, 0.1, 0]
@@ -215,9 +215,6 @@ const LOOK = 3.0    // seconds of music between the now line and the top edge
 const UMAX = 1.15   // notes are drawn a little beyond the top edge
 
 const keys = []
-for (let i = 0; i < NKEYS; i++) {
-  keys.push({ i, pitch: 0, pc: 0, black: false, x: 0, w: 0, cx: 0, laneW: 0, farX: 0, farW: 0, farCx: 0, lx0: 0, lx1: 0, lc: 0 })
-}
 const G = {
   W: -1, H: -1, ws: NaN, ctx: null, flat: false, dpr: 1, id: 0,
   kbTop: 0, kbH: 0, span: 14, nWhite: 14, ww: 0, farWW: 0, bh: 0, x0: 0,
@@ -237,7 +234,19 @@ const Y3 = (d, z) => P.yV + (P.k / (P.k + d)) * (P.a - z * P.w0 * P.hz)
 // line); farX / farW / farCx the same along the far edge (kbTop), where its notes land.
 // keyAt(x, y) is the index of the key at a screen point (along the front edge when y is left out),
 // -1 for none; keyX(i) is key i's left x on the front edge.
-const GEO = { kbTop: 0, kbH: 0, keyW: 0, keyCount: NKEYS, frontY: 0, keys, keyX: (i) => (keys[i] ? keys[i].x : -1), keyAt }
+const GEO = { kbTop: 0, kbH: 0, keyW: 0, keyCount: 0, frontY: 0, keys, keyX: (i) => (keys[i] ? keys[i].x : -1), keyAt }
+
+// How many keys the keyboard on screen has. The next frame lays it out again.
+export function setKeyCount(n) {
+  if (n === keys.length) return
+  keys.length = 0
+  for (let i = 0; i < n; i++) {
+    keys.push({ i, pitch: 0, pc: 0, black: false, x: 0, w: 0, cx: 0, laneW: 0, farX: 0, farW: 0, farCx: 0, lx0: 0, lx1: 0, lc: 0 })
+  }
+  GEO.keyCount = n
+  G.W = -1
+}
+setKeyCount(24)
 
 function keyAt(x, y) {
   if (!Number.isFinite(x)) return -1
@@ -269,7 +278,7 @@ function layout(ctx, W, H, ws, flat, dpr) {
   // across, in white-key widths from the keyboard's left end
   let wx = IS_BLACK[pcOf(ws)] ? 0.5 : 0
   let nWhite = 0
-  for (let i = 0; i < NKEYS; i++) {
+  for (let i = 0; i < keys.length; i++) {
     const k = keys[i]
     k.pitch = ws + i
     k.pc = pcOf(k.pitch)
@@ -278,7 +287,7 @@ function layout(ctx, W, H, ws, flat, dpr) {
     else { const c = wx + BLACK_SHIFT[k.pc]; k.lx0 = c - BLACK_W / 2; k.lx1 = c + BLACK_W / 2 }
     k.lc = (k.lx0 + k.lx1) / 2
   }
-  G.span = wx + (IS_BLACK[pcOf(ws + NKEYS - 1)] ? 0.5 : 0)
+  G.span = wx + (IS_BLACK[pcOf(ws + keys.length - 1)] ? 0.5 : 0)
   G.nWhite = nWhite
   G.kbH = Math.round(Math.min(Math.max(110, H * 0.225), H * 0.5))
   G.kbTop = H - G.kbH
@@ -450,18 +459,18 @@ function computeFingers(notes) {
 }
 
 /* ------------------------------------------------------- per-frame state */
-const kAct = new Array(NKEYS).fill(null)
-const kNext = new Array(NKEYS).fill(null)
-const kWait = new Array(NKEYS).fill(null)
-const kFb = new Array(NKEYS).fill(null)
-const kFbA = new Float32Array(NKEYS)
-const kHeld = new Uint8Array(NKEYS)
-const kPrevHeld = new Uint8Array(NKEYS)
-const kNextBubble = new Float64Array(NKEYS)
+const kAct = new Array(MAX_KEYS).fill(null)
+const kNext = new Array(MAX_KEYS).fill(null)
+const kWait = new Array(MAX_KEYS).fill(null)
+const kFb = new Array(MAX_KEYS).fill(null)
+const kFbA = new Float32Array(MAX_KEYS)
+const kHeld = new Uint8Array(MAX_KEYS)
+const kPrevHeld = new Uint8Array(MAX_KEYS)
+const kNextBubble = new Float64Array(MAX_KEYS)
 // what each key looks like this frame, before the animated overlays (wait pulse, judgement flash)
-const kFill = new Array(NKEYS).fill('')
-const kLit = new Uint8Array(NKEYS)
-const kDown = new Uint8Array(NKEYS)
+const kFill = new Array(MAX_KEYS).fill('')
+const kLit = new Uint8Array(MAX_KEYS)
+const kDown = new Uint8Array(MAX_KEYS)
 
 let lastPos = 0
 let burstEpoch = 1
@@ -538,7 +547,7 @@ function spawnBubble(k, t, big) {
   b.color = playgroundColor(k.pc)
 }
 function updateBubbles(s, t) {
-  for (let i = 0; i < NKEYS; i++) {
+  for (let i = 0; i < keys.length; i++) {
     const held = kHeld[i]
     if (held) {
       if (!kPrevHeld[i]) { spawnBubble(keys[i], t, true); kNextBubble[i] = t + 0.14 }
@@ -715,12 +724,12 @@ export function drawScene(ctx, W, H, s) {
 }
 
 function prepareKeys(s, view, ws, wall, freeplay, pos) {
-  for (let i = 0; i < NKEYS; i++) { kAct[i] = null; kNext[i] = null; kWait[i] = null; kFb[i] = null; kFbA[i] = 0; kHeld[i] = 0 }
+  for (let i = 0; i < keys.length; i++) { kAct[i] = null; kNext[i] = null; kWait[i] = null; kFb[i] = null; kFbA[i] = 0; kHeld[i] = 0 }
   const waiting = !!s.waiting
   if (waiting && s.needPitches && typeof s.needPitches[Symbol.iterator] === 'function') {
     for (const p of s.needPitches) {
       const i = p - ws
-      if (i < 0 || i >= NKEYS) continue
+      if (i < 0 || i >= keys.length) continue
       let c = null
       if (Array.isArray(s.waitNotes)) for (const n of s.waitNotes) if (n.pitch === p) { c = noteColor(n, view); break }
       kWait[i] = c || noteColor({ pitch: p, hand: p < 60 ? 'left' : 'right' }, view)
@@ -729,7 +738,7 @@ function prepareKeys(s, view, ws, wall, freeplay, pos) {
   if (Array.isArray(s.activeNotes)) {
     for (const n of s.activeNotes) {
       const i = n.pitch - ws
-      if (i < 0 || i >= NKEYS || kWait[i]) continue
+      if (i < 0 || i >= keys.length || kWait[i]) continue
       if (countingIn) { kNext[i] = noteColor(n, view); continue }
       kAct[i] = noteColor(n, view)
       // spark burst when a note reaches the line
@@ -742,16 +751,16 @@ function prepareKeys(s, view, ws, wall, freeplay, pos) {
   if (Array.isArray(s.upcomingNotes)) {
     for (const n of s.upcomingNotes) {
       const i = n.pitch - ws
-      if (i >= 0 && i < NKEYS && !kAct[i] && !kNext[i]) kNext[i] = noteColor(n, view)
+      if (i >= 0 && i < keys.length && !kAct[i] && !kNext[i]) kNext[i] = noteColor(n, view)
     }
   }
   if (s.held && typeof s.held[Symbol.iterator] === 'function') {
-    for (const p of s.held) { const i = p - ws; if (i >= 0 && i < NKEYS) kHeld[i] = 1 }
+    for (const p of s.held) { const i = p - ws; if (i >= 0 && i < keys.length) kHeld[i] = 1 }
   }
   const fb = s.feedback
   if (fb && typeof fb.forEach === 'function') {
     const now = wall * 1000
-    for (let i = 0; i < NKEYS; i++) {
+    for (let i = 0; i < keys.length; i++) {
       const e = fb.get(ws + i)
       if (!e || !(e.until > now)) continue
       kFb[i] = scoringColor(e.kind)
@@ -811,7 +820,7 @@ function drawFrame3D(ctx, s, W, H, view, notes, freeplay, pos, wall, sig) {
       ctx.fillText('Play anything — the keys are yours', W / 2, G.kbTop * 0.45)
     }
   } else {
-    for (let i = 0; i < NKEYS; i++) kPrevHeld[i] = kHeld[i]
+    for (let i = 0; i < keys.length; i++) kPrevHeld[i] = kHeld[i]
     drawHotSpots3D(ctx)
     drawNotes3D(ctx, s, notes, view, pos, pulse)
   }
@@ -1367,7 +1376,7 @@ function drawBlackKey(g, k, fill, lit, down) {
 
 // The wait pulse and judgement flashes change every frame, so they go over the cached keyboard;
 // the black keys beside a redrawn white key are drawn again to stay on top.
-const kRedrawBlack = new Uint8Array(NKEYS)
+const kRedrawBlack = new Uint8Array(MAX_KEYS)
 function drawKeyOverlays3D(ctx, pulse) {
   let any = false
   for (const k of keys) {
@@ -1390,7 +1399,7 @@ function drawKeyOverlays3D(ctx, pulse) {
     }
     drawWhiteLabel(ctx, k, !!kFb[i])
     if (i > 0 && keys[i - 1].black) kRedrawBlack[i - 1] = 1
-    if (i < NKEYS - 1 && keys[i + 1].black) kRedrawBlack[i + 1] = 1
+    if (i < keys.length - 1 && keys[i + 1].black) kRedrawBlack[i + 1] = 1
   }
   if (!any) return
   for (const k of keys) {
@@ -1434,7 +1443,7 @@ function drawFrameFlat(ctx, s, W, H, view, notes, pos, wall) {
   }
   ctx.fillStyle = G.floor; ctx.fillRect(0, 0, W, G.kbTop)
   drawLanes(ctx)
-  for (let i = 0; i < NKEYS; i++) kPrevHeld[i] = kHeld[i]
+  for (let i = 0; i < keys.length; i++) kPrevHeld[i] = kHeld[i]
   drawHotSpots(ctx)
   drawNotes(ctx, s, notes, view, pos, wall)
   ctx.fillStyle = G.fogFlat

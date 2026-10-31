@@ -581,16 +581,16 @@ body[data-screen="play"] #nav { display: none; }
 .setting-row > span:last-child { color: var(--muted); display: inline-flex; align-items: center; gap: 10px; text-align: right; }
 .settings-card h3 + .setting, .settings-card h3 + .setting-row { border-top: 0; }
 /* selects are outlined pills */
-.setting select, .fp-bar select {
+.setting select, .fp-bar select, .ob-port select {
   appearance: none; -webkit-appearance: none;
   height: 34px; padding: 0 36px 0 14px; max-width: 250px; cursor: pointer;
   border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text);
   background: var(--list) var(--chevron) no-repeat right 12px center / 14px 14px;
   transition: border-color var(--dur), box-shadow var(--dur), background-color var(--dur);
 }
-.setting select:hover, .fp-bar select:hover { border-color: var(--outline); }
-.setting select:focus-visible, .fp-bar select:focus-visible { outline: 0; border-color: var(--white); box-shadow: var(--focus-ring); }
-.setting select option { background: var(--list); color: var(--text); }
+.setting select:hover, .fp-bar select:hover, .ob-port select:hover { border-color: var(--outline); }
+.setting select:focus-visible, .fp-bar select:focus-visible, .ob-port select:focus-visible { outline: 0; border-color: var(--white); box-shadow: var(--focus-ring); }
+.setting select option, .ob-port select option { background: var(--list); color: var(--text); }
 .setting input[type="range"] { width: 180px; accent-color: var(--accent-hi); cursor: pointer; }
 /* checkboxes are drawn as switches */
 .setting input[type="checkbox"] {
@@ -836,6 +836,8 @@ body[data-screen="play"]:has(#camPip:not(.hidden)) .toast { top: 228px; }
   transform: rotateX(48deg) rotateZ(-24deg); position: relative;
 }
 .ob-keys i { width: 26px; height: 150px; border-radius: 0 0 6px 6px; background: var(--key-white); box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.16); transition: background-color .1s, box-shadow .1s; }
+.ob-keys.long { gap: 2px; padding: 22px 16px 18px; }
+.ob-keys.long i { width: 12px; height: 130px; border-radius: 0 0 4px 4px; }
 .ob-keys i:nth-child(5) { animation: keyGlowL 2.6s ease-in-out infinite; }
 .ob-keys i:nth-child(9) { animation: keyGlowR 2.6s ease-in-out infinite; animation-delay: .5s; }
 @keyframes keyGlowL { 0%, 100% { background: var(--key-white); } 40%, 60% { background: var(--left); box-shadow: 0 0 30px var(--left); } }
@@ -853,6 +855,9 @@ body[data-screen="play"]:has(#camPip:not(.hidden)) .toast { top: 228px; }
 #onboarding:where([data-step="lights"]) .ob-keys.sweep i { animation: obSweep .62s ease-out calc(var(--i, 0) * 30ms) both; }
 #onboarding .ob-keys i.down { animation: none; background: var(--left); box-shadow: 0 0 30px var(--left); }
 #onboarding .ob-keys i.down:nth-child(n+8) { background: var(--right); box-shadow: 0 0 30px var(--right); }
+#onboarding .ob-keys.long i.down:nth-child(-n+15) { background: var(--left); box-shadow: 0 0 30px var(--left); }
+.ob-port { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 0; font-size: 13px; }
+.ob-port select { max-width: 70%; }
 @keyframes obGuide { 0%, 100% { background: var(--key-white); } 50% { background: var(--accent-hi); box-shadow: 0 0 34px var(--accent-hi); } }
 @keyframes obSweep { 0%, 100% { background: var(--key-white); } 35% { background: var(--accent-hi); box-shadow: 0 0 26px var(--accent-hi); } }
 
