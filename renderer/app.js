@@ -611,7 +611,7 @@ function renderSetup() {
   const kb = midiInput && midiInput.state !== 'disconnected' ? 'on' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'off'
   const lights = setupLightsState()
   const canLight = lights === 'on' || lights === 'midi'
-  const noKeyboard = kb === 'checking' ? ['wait', 'Looking for your keyboard…'] : ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
+  const noKeyboard = kb === 'checking' ? ['wait', 'Looking for your keyboard…'] : kbAsk ? ['warn', 'Several MIDI inputs found. Choose your keyboard below.'] : ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
   const lit = lights === 'on' ? ' (it’s lit)' : ''
   let v
   if (step === 'sound') {
@@ -3188,7 +3188,7 @@ function swapLights() {
 // port that way: only someone choosing that port says it is the keyboard.
 const KB_PORT = /lumi|\bpiano m\b/i, KB_MAKER = /roli/i, KB_UNNAMED = /usbmidi2/i
 const TWO_KEYBOARDS = '__two__'     // settings.kbPort: the two likeliest inputs, as one keyboard
-const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|\bloop|yoke|through|\bthru\b|rtp/i
+const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|\bloop|yoke|through|\bthru\b|rtp|\bsim\b/i
 function pickPorts(ins, outs, choice = '') {
   const label = (p) => (p.name || '') + ' ' + (p.manufacturer || '')
   const rank = (p) => (KB_PORT.test(label(p)) ? 3 : KB_MAKER.test(label(p)) ? 2 : SOFT_PORT.test(label(p)) ? 0 : 1)
@@ -3216,6 +3216,8 @@ function pickPorts(ins, outs, choice = '') {
     const a = ownOf(likely[0]), b = ownOf(likely[1])
     return { input: likely[0], output: canLight(a) ? a : null, input2: likely[1], output2: canLight(b) && b !== a ? b : null }
   }
+  // Automatic won't guess between inputs that don't say what they are: the wrong one is silent.
+  if (!choice && !best(ins, 2) && new Set(live.filter((p) => rank(p) === 1).map((p) => p.name)).size > 1) return { input: null, output: null, ask: true }
   const input = choice === TWO_KEYBOARDS ? likely[0] || null : choice ? named(ins, choice) : best(ins, 1)
   if (choice && !input) return { input: null, output: null }
   const own = input && ownOf(input)
@@ -3247,13 +3249,16 @@ function fillKbPorts() {
 }
 
 let midiState = null    // what the last 'keylight:midi' event said
+let kbAsk = false       // Automatic found several inputs and needs you to choose one
 // Called at boot and whenever a port comes or goes (opening one counts too), so a
 // keyboard switched on or woken from sleep after launch plays, waits and lights like
 // one found at boot. The onboarding listens for 'keylight:midi'.
 function bindMidiPorts() {
   if (!midi) return
   const wasTwo = !!midiInput2
-  const { input, output, input2 = null, output2 = null } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
+  const { input, output, input2 = null, output2 = null, ask = false } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
+  if (ask && !kbAsk) status('Several MIDI inputs found: choose your keyboard in Settings')
+  kbAsk = ask
   if (input !== midiInput || input2 !== midiInput2) {
     if (midiInput) midiInput.onmidimessage = null
     if (midiInput2) midiInput2.onmidimessage = null
@@ -3283,11 +3288,11 @@ function bindMidiPorts() {
   if (wasTwo && !midiInput2) setKeyboardWindow(kbBase())
   fillKbPorts()
   updateKbChip()
-  const detail = { connected: !!midiInput, name: midiInput ? midiInput.name + (midiInput2 ? ' + ' + midiInput2.name : '') : null }
-  if (midiState && midiState.connected === detail.connected && midiState.name === detail.name) return
+  const detail = { connected: !!midiInput, name: midiInput ? midiInput.name + (midiInput2 ? ' + ' + midiInput2.name : '') : null, ask: kbAsk }
+  if (midiState && midiState.connected === detail.connected && midiState.name === detail.name && midiState.ask === detail.ask) return
   midiState = detail
   const obd = $('obDevice')
-  if (obd) obd.textContent = midiInput2 ? 'Two keyboards connected' : midiInput ? 'Keyboard connected' : 'No keyboard found — plug in your keyboard'
+  if (obd) obd.textContent = midiInput2 ? 'Two keyboards connected' : midiInput ? 'Keyboard connected' : kbAsk ? 'Several MIDI inputs found — choose your keyboard' : 'No keyboard found — plug in your keyboard'
   console.log('MIDI keyboard ' + (midiInput ? 'in=' + midiInput.name + ' out=' + (midiOutput ? midiOutput.name : 'none') + (midiInput2 ? ' in2=' + midiInput2.name + ' out2=' + (midiOutput2 ? midiOutput2.name : 'none') : '') : 'none') +
     ' (inputs=' + [...midi.inputs.values()].map((p) => p.name + (p.state === 'disconnected' ? ' (gone)' : '')).join('|') + ')')
   window.dispatchEvent(new CustomEvent('keylight:midi', { detail }))
@@ -3309,7 +3314,7 @@ function updateKbChip() {
   chip.classList.toggle('on', connected)
   const lit = framesDrive() || (noteLightsOnly() && !!midiOutput)
   const name = midiInput2 ? 'Two keyboards' : 'Keyboard'
-  $('kbStatusText').textContent = connected ? (lit ? name + ' connected' : name + ' · lights off') : 'No keyboard'
+  $('kbStatusText').textContent = connected ? (lit ? name + ' connected' : name + ' · lights off') : kbAsk ? 'Choose a keyboard' : 'No keyboard'
   if (noteLightsOnly()) showWindowsLights()
 }
 
@@ -3318,7 +3323,7 @@ function updateKbChip() {
 function showWindowsLights() {
   const ready = framesDrive()
   const el = $('daemonState')
-  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? 'No keyboard found' : 'checking…'
+  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? (kbAsk ? 'Choose your keyboard below' : 'No keyboard found') : 'checking…'
   const b = $('brightness')
   if (b) {
     b.disabled = !ready
@@ -3332,7 +3337,7 @@ function applyWindowsPage() {
   const set = (id, text) => { const el = $(id); if (el) el.textContent = text }
   set('lightsLabel', 'Key lights')
   set('recordTakesNote', 'Saves each run in the player as a video with Keylight’s sound to ' + TAKES_FOLDER + ', for making videos.')
-  set('importPrivacy', 'A recording becomes notes on ' + THIS_COMPUTER + ', and the file is never uploaded. MIDI and MusicXML files are read as written.')
+  set('importPrivacy', 'A recording becomes notes on ' + THIS_COMPUTER + ', and the file is never uploaded. MIDI and MusicXML files are read as written. Only add music you have the right to use. With the lookup on, cover art comes from iTunes and lyrics from LRCLIB.')
   set('camHelp', 'Point a camera down at the keyboard. Keylight then shows which finger is over which key, before you press it.')
   showWindowsLights()
 }
@@ -3627,6 +3632,7 @@ function initDaemon() {
       applyDeviceMode()
       return
     }
+    const was = daemonState
     daemonState = state
     showDaemonState()
     updateKbChip()
@@ -3638,7 +3644,7 @@ function initDaemon() {
       serviceBoardsChanged()
       applyDeviceMode()
       setKeyboardWindow(player && song ? (song.fitStart ?? player.windowStart) : kbBase())
-    } else console.log('LED daemon: ' + state)
+    } else if (state !== was) console.log('LED daemon: ' + state)   // it retries every 2 s
   }, handleKeyButton, onDeviceConfig)
   daemon.setLeft(settings.kbLightsLeft)
   daemon.connect()
@@ -4826,6 +4832,12 @@ async function runSelfTest() {
       check('auto skips a loopback', got === 'USBMidi2-ACX/-', got)
       got = pick(['LoopBe Internal MIDI', 'ROLI Piano'], ['LoopBe Internal MIDI', 'ROLI Piano'])
       check('auto finds the piano', got === 'ROLI Piano/ROLI Piano', got)
+      got = pick(['loopMIDI-sim-in', 'USBMidi2-ACX'], ['USBMidi2-ACX'])
+      check('auto skips a simulator port', got === 'USBMidi2-ACX/-', got)
+      check('auto asks between unnamed inputs', pickPorts([port('Casio'), port('USBMidi2-ACX')], []).ask === true && pick(['Casio', 'USBMidi2-ACX'], []) === '-/-')
+      check('auto does not ask for one namesake', !pickPorts([port('Casio'), port('Casio')], []).ask)
+      check('auto does not ask with a named keyboard', !pickPorts([port('Casio'), port('ROLI Piano')], []).ask)
+      check('a choice is not asked about', pick(['Casio', 'USBMidi2-ACX'], [], 'Casio') === 'Casio/-')
       got = pick(['Loopback', 'USBMidi2-ACX'], ['Loopback', 'USBMidi2-ACX'], 'USBMidi2-ACX')
       check('choice lights its own output', got === 'USBMidi2-ACX/USBMidi2-ACX', got)
       got = pick(['Casio', 'LUMI Keys BLOCK'], ['Casio', 'LUMI Keys BLOCK'], 'Casio')

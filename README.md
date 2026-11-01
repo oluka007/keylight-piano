@@ -341,19 +341,21 @@ hold is named above the keys.
 ## The 49-key ROLI Piano (beta)
 
 Keylight shows all 49 keys, and your song, lessons and the Playground use the whole
-keyboard. This was built from a tester's measurements and simulated key presses, and has
-not been checked on the keyboard by the maintainer yet, so please report how it goes in an
-[issue](https://github.com/scizerss/keylight-piano/issues).
+keyboard. This was built from a tester's measurements. That tester then ran 0.2.2 on the
+keyboard (Windows 11, firmware 1.5.0, Windows' USB MIDI 2.0 driver): setup found both ends, a song
+played to the end, and the keys lit up. Mac and ROLI's own driver are still untried, so please
+report how it goes in an [issue](https://github.com/scizerss/keylight-piano/issues).
 
 - **Number of keys:** a port named "ROLI Piano" is recognised. Otherwise press the two end keys
   in the setup (Settings > Run setup again), or Keylight works it out once you have twice played
   notes more than 24 keys apart at the same moment. Settings > Number of keys overrules it.
-- **Wrong input?** Choose your keyboard in Settings > Keyboard. Keylight remembers it, and
+- **Wrong input?** Choose your keyboard in Settings > Keyboard; Automatic asks you to when it
+  finds several inputs that don't say what they are. Keylight remembers it, and
   shows it as "(not connected)" while it is unplugged rather than switching to another input.
   Without ROLI's software, Windows' USB MIDI 2.0 driver calls the keyboard "USBMidi2-ACX".
 - **Key lights:** blocksd only drives the 24-key keyboards, so Keylight sends MIDI notes for
-  the lights, on Mac as well as Windows. Whether the 49-key keyboard lights up from them is
-  not confirmed yet. A port named "USBMidi2-ACX" only gets them once you choose it by name,
+  the lights, on Mac as well as Windows, and the keyboard lights up from them in its own colours
+  (confirmed on Windows). A port named "USBMidi2-ACX" only gets them once you choose it by name,
   since any other device with that name would play them as music.
 - **Octave:** Keylight can't move this keyboard's octave or ask where it is, so the screen shows
   where the keys last were, for every song, and tells you when notes sit beyond them. If you
@@ -559,8 +561,10 @@ LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bu
 - Sheet music comes from a song's MusicXML, so MIDI files and recordings don't show any, and a
   MusicXML song added before 0.2.3 needs adding again. It shows in the player only, not in lessons
   or games, and takes record the stage without it.
-- The app never downloads music. Songs are public-domain MusicXML; import your own
-  `.mid` / MusicXML files from Search.
+- The app never downloads music. Its songs are public-domain MusicXML; import your own MP3,
+  `.mid` or MusicXML files from Search. Only add music you have the right to use. What you
+  import stays on your computer. With the lookup on, the song's title and artist are sent to the
+  iTunes Search API for cover art and to LRCLIB for lyrics; those belong to their owners.
 
 ## Roadmap
 
