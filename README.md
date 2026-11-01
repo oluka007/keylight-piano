@@ -36,7 +36,8 @@ Full videos with sound: [app tour (65 s)](https://github.com/scizerss/keylight-p
   you play. The notes are worked out on your own computer and the file is never
   uploaded; cover and lyrics come from the file's tags, or from a quick online lookup
   (iTunes Search, LRCLIB) that you can switch off. MIDI and MusicXML work too.
-- Four note views: a 3D cascade, Rainbow, Colornote and Classic
+- Four note views: a 3D cascade, Rainbow, Colornote and Classic, and sheet music above
+  them that follows along for any MusicXML song
 - The keyboard's own keys light up the next note; on a Mac, in four light styles you
   switch with the keyboard's mode button
 - Wait mode (the song waits for you on every note), 0.5x / 0.75x / full speed, loop
@@ -360,6 +361,35 @@ not been checked on the keyboard by the maintainer yet, so please report how it 
   several notes an octave away from the song. Otherwise − and + in the player line the screen
   up with your keys.
 
+## Two keyboards as one (beta)
+
+Two Piano M or LUMI Keys keyboards play as one row of 48 keys. This was built from ROLI's
+documentation, the blocksd source and simulated key presses, and has not been tried on two real
+keyboards yet, so please report how it goes in an
+[issue](https://github.com/scizerss/keylight-piano/issues) and attach `app.log`.
+
+- **Two USB cables:** two inputs named for these keyboards pair up by themselves. On other
+  names, choose **Two keyboards as one** in Settings > Keyboard. Then run the setup (Settings >
+  Run setup again) and press the far-left key of the left keyboard and the far-right key of the
+  right one: that tells Keylight which is which and where each one's keys are. To play on just
+  one, unplug the other (identical keyboards have the same name, so the list can't tell them apart).
+- **Joined with the magnetic connector, one USB cable:** the computer most likely sees one
+  keyboard. On a Mac, blocksd counts two and the screen shows 48 keys. Elsewhere, the setup works
+  it out when you press the two far ends, if the port is named for these keyboards; on any other
+  name (Windows' USB MIDI 2.0 driver calls every port "USBMidi2-ACX") set Settings > Number of keys
+  to 48. Go back to one
+  keyboard by running the setup again, or setting that back to Automatic.
+- **Key lights:** on a Mac with blocksd each keyboard gets its own frame, so the light styles
+  work across both. Otherwise they light from MIDI notes, in the keyboard's own colours.
+  Nothing says which keyboard is on which side for the lights, so if they start on the right
+  one, use **Swap keyboards** in Settings or the setup.
+- **Octave:** on two cables − and + move all 48 keys, and each song moves them to fit. If a
+  keyboard's own octave button moves it, Keylight notices when you next play outside its range, and
+  the setup puts everything right. Joined keyboards work like the 49-key keyboard: the screen stays
+  with the keys, and − and + line it up.
+- **Not yet:** hand tracking and its camera set-up still cover one keyboard only, and battery
+  level shows the first keyboard.
+
 ## Lighting
 
 Per-key RGB through blocksd (`renderer/daemon.js`). blocksd's program owns the LEDs,
@@ -526,6 +556,9 @@ LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bu
 
 ## Notes
 
+- Sheet music comes from a song's MusicXML, so MIDI files and recordings don't show any, and a
+  MusicXML song added before 0.2.3 needs adding again. It shows in the player only, not in lessons
+  or games, and takes record the stage without it.
 - The app never downloads music. Songs are public-domain MusicXML; import your own
   `.mid` / MusicXML files from Search.
 

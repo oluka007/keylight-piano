@@ -25,5 +25,13 @@ curl -sfL -o "$ROOT/renderer/models/hand_landmarker.task" \
 "$ROOT/scripts/vendor-licenses.sh" node_modules "$ROOT/renderer/vendor/LICENSES.txt"
 # tasks-vision ships no licence file: it is Apache-2.0, the same text as Basic Pitch
 cp "$ROOT/renderer/models/basic-pitch/LICENSE" "$ROOT/renderer/vendor/mediapipe/LICENSE"
+# sheet music: OSMD's own browser build, loaded as a classic script (see renderer/sheet.js). Installed
+# on its own so its licence file lists only what that build bundles; its optional native gl isn't used.
+mkdir sheet && cd sheet
+npm init -y >/dev/null
+npm install --no-audit --no-fund --ignore-scripts --omit=optional opensheetmusicdisplay@2.2.1 >/dev/null
+cp node_modules/opensheetmusicdisplay/build/opensheetmusicdisplay.min.js "$ROOT/renderer/vendor/"
+"$ROOT/scripts/vendor-licenses.sh" node_modules "$ROOT/renderer/vendor/opensheetmusicdisplay.LICENSES.txt"
+cd "$TMP"
 rm -rf "$TMP"
 echo "vendor bundles rebuilt"

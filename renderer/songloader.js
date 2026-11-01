@@ -62,6 +62,7 @@ export function normalise(title, parsed) {
   if (parsed.timeSignature) song.timeSignature = parsed.timeSignature
   if (parsed.parts) song.parts = parsed.parts
   if (parsed.bars) song.bars = parsed.bars
+  if (parsed.score) song.score = parsed.score
   return song
 }
 

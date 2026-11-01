@@ -5,6 +5,7 @@ import { drawScene, noteName, setKeyCount } from './views.js'
 import { loadSongFile } from './songloader.js'
 import { assignFingering } from './fingering.js'
 import { parseMusicXml } from './musicxml.js'
+import { SheetStrip, playedTimeline, timelineX } from './sheet.js'
 import { LedDaemon } from './daemon.js'
 import { SongScheduler } from './scheduler.js'
 import { HandTracker, listCameras, BONES, TIPS } from './handtrack.js'
@@ -68,8 +69,8 @@ const DEFAULTS = {
   brightness: 255, volume: 80, backingVolume: 70,
   countIn: 4, metronome: false, labels: 'off', view: 'CASCADE',
   hands: 'both', rate: 1, band: false, waitMode: 'pauseAndSnap', instrument: 'grand', keyboardMode: 'Pro', bendRange: 12,
-  accompany: true, kbZero: 48, kbPort: '', kbLast: '', kbKeysFor: {}, kbBaseFor: {}, userColor: '#a78bfa', expression: null, audioOutput: '',
-  recordTakes: false
+  accompany: true, kbZero: 48, kbPort: '', kbLast: '', kbKeysFor: {}, kbBaseFor: {}, kbPair: {}, kbLightsLeft: '', kbLightsSwap: false, userColor: '#a78bfa', expression: null, audioOutput: '',
+  recordTakes: false, sheet: false
 }
 
 const store = {
@@ -88,6 +89,7 @@ let song = null
 let daemon = null
 let daemonState = 'checking'
 let midi = null, midiInput = null, midiOutput = null
+let midiInput2 = null, midiOutput2 = null    // the second keyboard, on its own USB cable
 let freeplay = false
 let feedback = new Map()        // pitch -> { kind, until }
 let missedBlink = new Map()     // pitch -> until
@@ -149,7 +151,8 @@ function boot() {
   const q = new URLSearchParams(location.search)
   if (IS_WIN) applyWindowsPage()
   wireUI()
-  if (KB_SIZES.includes(Number(q.get('keys')))) settings.kbKeysFor[kbLabel()] = Number(q.get('keys'))   // keys=49: the longer keyboard, for screenshots
+  if (q.has('notation')) settings.sheet = q.get('notation') === '1'   // notation=1: for screenshots
+  if ([...KB_SIZES, 48].includes(Number(q.get('keys')))) settings.kbKeysFor[kbLabel()] = Number(q.get('keys'))   // keys=49 or 48: the longer keyboards, for screenshots
   restoreKeysAt()
   applyKeyCount()
   fillKbPorts()
@@ -400,6 +403,9 @@ const setup = {
   lowKey: null,       // keyboard step: the far-left key, waiting for the far-right one
   wrongKey: null,     // ...or the key that was neither
   rangeDone: false,
+  lowPress: null,     // ...which of two keyboards that was, and the note it sent
+  otherKeyboard: false,   // two keyboards: the far-right key has to be on the other one
+  pressOf: new Map(), // two keyboards: pitch -> the keyboard and note of its last press
   lights: null,       // the answer to "did your keys light up?": null, 'yes' or 'no'
   sweepAt: 0,
   seen: new Set(), lastTick: 0, glow: new Array(14).fill(0),
@@ -413,7 +419,7 @@ function openSetup(step = 1) {
   const ob = $('onboarding')
   if (!ob) return
   const now = performance.now()
-  Object.assign(setup, { open: true, openedAt: now, furthest: 0, heard: null, lowKey: null, wrongKey: null, rangeDone: false, lights: null, sweepAt: 0, seen: new Set(held), lastTick: now, returnFocus: document.activeElement })
+  Object.assign(setup, { open: true, openedAt: now, furthest: 0, heard: null, lowKey: null, lowPress: null, wrongKey: null, otherKeyboard: false, rangeDone: false, lights: null, sweepAt: 0, seen: new Set(held), lastTick: now, returnFocus: document.activeElement })
   ob.classList.remove('hidden')
   // a first run is left step by step; once it has been done, it can just be closed
   const again = store.get('lumi.onboarded', false)
@@ -454,7 +460,7 @@ function goSetupStep(i) {
   setup.step = Math.max(0, Math.min(SETUP_STEPS.length - 1, i))
   setup.furthest = Math.max(setup.furthest, setup.step)
   const step = SETUP_STEPS[setup.step]
-  if (step === 'keyboard') { setup.lowKey = null; setup.wrongKey = null }
+  if (step === 'keyboard') { setup.lowKey = null; setup.lowPress = null; setup.wrongKey = null; setup.otherKeyboard = false }
   if (step === 'lights' && setup.lights !== 'yes') setup.lights = null
   renderSetup()
   if (step === 'lights') sweepSetupLights()
@@ -488,7 +494,7 @@ function sweepSetupLights() {
 }
 
 function setupLightsState() {
-  if (daemon && daemon.ready) return 'on'
+  if (framesDrive()) return 'on'
   // No light service for this keyboard: it lights keys from MIDI notes ('midi'), once
   // its MIDI output is found ('no-output' until then; 'checking' while MIDI starts)
   if (noteLightsOnly()) return midiOutput ? 'midi' : midiInput ? 'no-light-port' : !midi && performance.now() - setup.openedAt < 3000 ? 'checking' : 'no-output'
@@ -527,8 +533,12 @@ function onSetupKey(pitch) {
     if (setup.heard == null) console.log('SETUP heard ' + noteName(pitch))
     setup.heard = pitch
     renderSetup()
+  } else if (step === 'keyboard' && !setup.rangeDone && midiInput2) {
+    onPairSetupKey(pitch)
   } else if (step === 'keyboard' && !setup.rangeDone) {
-    const r = readEndKeys(setup.lowKey, pitch, kbBase())
+    // 47 apart on a port named for the 24-key keyboards: two joined, unless the light service counts one
+    const joinable = KB_PORT.test(kbLabel()) && !(daemon && daemon.ready && daemon.count < 2)
+    const r = readEndKeys(setup.lowKey, pitch, kbBase(), joinable ? KB_JOINED_SIZES : KB_SIZES)
     if (r.done) {
       learnKeyCount(r.keys)     // may move the window to fit a loaded song, so the shift comes after
       const shift = setup.lowKey - kbBase()
@@ -541,13 +551,45 @@ function onSetupKey(pitch) {
   }
 }
 
+// Two keyboards on two cables: the far-left key of the left one, then the far-right key of the
+// right one. Which port each press came from says which keyboard is where, and each press
+// says where that keyboard's keys are, wherever its own octave is.
+function onPairSetupKey(pitch) {
+  const press = setup.pressOf.get(pitch)
+  if (!press) return
+  const pc = (((press.raw - settings.kbZero) % 12) + 12) % 12
+  setup.otherKeyboard = false
+  setup.wrongKey = null
+  if (setup.lowKey == null || !setup.lowPress) {
+    if (pc === 0) { setup.lowKey = pitch; setup.lowPress = press }
+    else { setup.lowKey = null; setup.wrongKey = pitch }
+  } else if (press.slot === setup.lowPress.slot) {
+    if (pc === 0) { setup.lowKey = pitch; setup.lowPress = press }   // a different C on the same keyboard: start from it
+    else setup.otherKeyboard = true
+  } else if (pc !== 11) {
+    setup.wrongKey = pitch
+    setup.lowKey = null
+  } else {
+    const left = setup.lowPress.slot
+    pair.side[left] = 0
+    pair.side[1 - left] = 1
+    pair.low[left] = setup.lowPress.raw
+    pair.low[1 - left] = press.raw - 23
+    savePair()
+    setup.rangeDone = true
+    console.log('SETUP two keyboards: left is port ' + (left + 1) + ' from ' + pair.low[left] + ', right is port ' + (2 - left) + ' from ' + pair.low[1 - left])
+  }
+  renderSetup()
+}
+
 // The keyboard step's two presses. The far-left key is always a C and the far-right one
-// is 23 keys above it (48 on the 49-key ROLI Piano). Only the pair pins the range down: one
-// press of a C can't tell the bottom C from the middle one. When done, keys is how many the
-// keyboard has and shift is how far `base` (the range the app assumed, kbBase) was off.
-function readEndKeys(low, pitch, base) {
+// is 23 keys above it (48 on the 49-key ROLI Piano, 47 on two keyboards joined together). Only
+// the pair pins the range down: one press of a C can't tell the bottom C from the middle one.
+// When done, keys is how many the keyboard has and shift is how far `base` (the range the app
+// assumed, kbBase) was off.
+function readEndKeys(low, pitch, base, sizes = KB_SIZES) {
   const keys = low == null ? 0 : pitch - low + 1
-  if (KB_SIZES.includes(keys)) return { done: true, shift: low - base, keys }
+  if (sizes.includes(keys)) return { done: true, shift: low - base, keys }
   if ((((pitch - base) % 12) + 12) % 12 === 0) return { low: pitch }
   return { low: null, wrong: pitch }
 }
@@ -583,9 +625,11 @@ function renderSetup() {
   } else if (step === 'keyboard') {
     v = {
       title: 'Press the lowest key',
-      copy: 'That’s the key at the far left. Then press the one at the far right, so the lights land on the keys you play.',
+      copy: midiInput2 ? 'That’s the key at the far left of your left keyboard. Then press the far-right key of your right keyboard, so Keylight knows which is which.'
+        : 'That’s the key at the far left. Then press the one at the far right, so the lights land on the keys you play.',
       check: setup.rangeDone ? ['ok', 'Got it: your keys play ' + keysRange()]
         : kb !== 'on' ? noKeyboard
+        : setup.otherKeyboard ? ['warn', 'That’s the same keyboard. Now press the far-right key of the other one']
         : setup.wrongKey != null ? ['warn', 'That was ' + noteName(setup.wrongKey) + '. Start with the key at the far left' + lit]
         : setup.lowKey == null ? ['wait', 'Keyboard connected. Press the key at the far left' + lit]
         : ['wait', 'Now press the key at the far right' + lit]
@@ -640,6 +684,7 @@ function renderSetup() {
   if (out > 0.05) setText($('obLatency'), 'Your speakers or headphones add about ' + Math.round(out * 1000) + ' ms of delay; wired headphones keep you in time. Bluetooth is the usual cause.')
   $('obInstall').classList.toggle('hidden', lights !== 'off')
   $('obLightsAgain').classList.toggle('hidden', !(canLight && setup.lights === 'no'))
+  $('obSwapLights').classList.toggle('hidden', !(step === 'lights' && canLight && canSwapLights()))
   if (step === 'ready') renderSetupSummary(lights)
   ob.querySelectorAll('#obSteps li').forEach((li, i) => {
     const done = setupPassed(SETUP_STEPS[i]) && i !== setup.step
@@ -700,6 +745,8 @@ function wireFirstRunUI() {
   $('obLightsYes').onclick = () => answerLights(true)
   $('obLightsNo').onclick = () => answerLights(false)
   $('obLightsAgain').onclick = () => { setup.lights = null; renderSetup(); sweepSetupLights() }
+  $('obSwapLights').onclick = () => { swapLights(); setup.lights = null; renderSetup(); sweepSetupLights() }
+  $('swapLights').onclick = () => { swapLights(); runLightTest() }
   $('obCopy').onclick = async () => {
     try { await navigator.clipboard.writeText($('obCode').textContent); status('Copied: paste it into Terminal') } catch { status('Select the two lines and copy them with ⌘C') }
   }
@@ -811,6 +858,14 @@ function wireUI() {
   $('impAnother').onclick = async () => { await renameImported(); openImportSheet() }
   $('impTitle').onchange = renameImported
   $('impArtist').onchange = renameImported
+  $('btnSheet').onclick = () => {
+    settings.sheet = !settings.sheet
+    saveSettings()
+    // drawing a score holds everything up for a moment, which playing notes can't wait for
+    if (settings.sheet && player && player.clockRunning && song && sheet.score !== song.score) togglePlay()
+    applySheet()
+    syncHudButtons()
+  }
   $('btnLyrics').onclick = () => { showLyrics = !showLyrics; if (song) applySongMedia({ ...song, audio: null, cover: song.cover }); $('btnLyrics').classList.toggle('on', showLyrics) }
   // drop a song anywhere in the window
   let dragDepth = 0
@@ -1582,7 +1637,7 @@ async function openImported(id) {
     const rec = await getImported(id)
     if (!rec) { status('That song is no longer in your library'); return loadImportedLibrary() }
     song = { title: rec.title, artist: rec.artist, notes: rec.notes, duration: rec.duration, tempo: rec.tempo,
-      timeSignature: rec.timeSignature || null, parts: rec.parts || null, bars: rec.bars || null,
+      timeSignature: rec.timeSignature || null, parts: rec.parts || null, bars: rec.bars || null, score: rec.score || null,
       cover: rec.cover, lyrics: rec.lyrics, lyricsFromFile: rec.lyricsFromFile, audio: rec.audio, source: rec.source, file: rec.file, importedId: rec.id }
     pushRecent(rec.file)
     startSong()
@@ -1611,6 +1666,7 @@ function resetSession({ exercise = null, lesson = null, game = null } = {}) {
   backdropImg = null
   $('lyrics').classList.add('hidden')
   $('btnLyrics').classList.add('hidden')
+  hideSheet()
   freeplay = false
   exerciseMeta = exercise
   lessonMeta = lesson
@@ -1655,9 +1711,45 @@ function startSong() {
   showScreen('play')
   $('title').textContent = song.title
   $('subtitle').textContent = `${song.artist || ''} · ${song.notes.length} notes`
+  applySheet()
   syncHudButtons()
   resize()
   status(missing ? noHandPart(settings.hands) : song.source === 'audio' ? 'Ready — the recording plays along. Press Play' : 'Ready — press Play')
+}
+
+// Sheet music, for a song that has a score: only a song played from the library (a lesson, game
+// or exercise has its own steps to follow), and not for MIDI or a recording, which have no
+// written score to show.
+const sheet = new SheetStrip($('sheetStrip'), $('sheetMusic'))
+let sheetErrorLogged = false
+const songHasSheet = () => !!(song && song.score && player && !freeplay && !lessonMeta && !gameMeta && !exerciseMeta)
+function applySheet() {
+  const has = songHasSheet()
+  $('btnSheet').classList.toggle('hidden', !has)
+  const on = has && settings.sheet
+  const box = $('sheetStrip')
+  if (box.classList.contains('hidden') === on) {
+    box.classList.toggle('hidden', !on)
+    resize()
+  }
+  if (!on) { sheet.cancel(); return }
+  sheet.show(song.score).catch((e) => {
+    console.log('SHEET could not draw: ' + (e && e.message))
+    status('Could not show the sheet music: ' + (e && e.message))
+    box.classList.add('hidden')
+    $('btnSheet').classList.add('hidden')    // for this song: others may draw fine
+    resize()
+  })
+}
+function hideSheet() {
+  sheet.cancel()
+  $('btnSheet').classList.add('hidden')
+  if (!$('sheetStrip').classList.contains('hidden')) { $('sheetStrip').classList.add('hidden'); resize() }
+}
+// Per frame, and a failure here must not cost the lights and the HUD that come after it.
+function updateSheet(pos) {
+  if ($('sheetStrip').classList.contains('hidden')) return
+  try { sheet.update(pos) } catch (e) { if (!sheetErrorLogged) { sheetErrorLogged = true; console.log('SHEET update failed: ' + (e && e.message)) } }
 }
 
 // An imported recording plays along (in sync with the song clock), its cover
@@ -1774,7 +1866,7 @@ const cameraOn = () => !!(tracker && tracker.running)
 // Light one key (or none) so the camera can find it.
 function lightKey(i) {
   if (!daemon || !daemon.ready) return
-  const f = Array.from({ length: 24 }, () => [0, 0, 0])
+  const f = Array.from({ length: lightKeys() }, () => [0, 0, 0])
   if (i != null) f[i] = [255, 255, 255]
   daemon.send(f)
 }
@@ -1790,22 +1882,22 @@ function lightTestFrames(base = kbBase()) {
   const frames = []
   for (let f = 0; f < steps; f++) {
     const t = f / (steps - 1)
-    const x = (t <= 0.5 ? t * 2 : 2 - t * 2) * 23
-    frames.push(Array.from({ length: 24 }, (_, i) => {
+    const x = (t <= 0.5 ? t * 2 : 2 - t * 2) * (lightKeys() - 1)
+    frames.push(Array.from({ length: lightKeys() }, (_, i) => {
       const k = Math.max(0, 1 - Math.abs(i - x) / 2.2)
       return k > 0 ? dimRgb(t <= 0.5 ? stageRgb(base + i) : [255, 255, 255], k) : [0, 0, 0]
     }))
   }
-  const off = Array.from({ length: 24 }, () => [0, 0, 0])
+  const off = Array.from({ length: lightKeys() }, () => [0, 0, 0])
   return [...frames, off, off]
 }
 // The test owns the keys like a ceremony does, so the frame loop waits, then puts the
 // current picture back. A key still marked as held (its note-off got lost) is let go too.
 function runLightTest() {
-  if (noteLightsOnly() && !(daemon && daemon.ready)) { runMidiLightTest(); return }
+  if (noteLightsOnly() && !framesDrive()) { runMidiLightTest(); return }
   if (!daemon || !daemon.ready) {
     // without the light service the keyboard lights keys from MIDI notes: switch those off
-    if (midiOutput) { clearLights(midiOutput); litNotes.clear() }
+    if (midiOutput) { clearLights(midiOutput); litNotes.clear(); litRoutes.clear() }
     status(daemonState === 'no-device' ? 'The light service has not found your keyboard: check it is plugged in over USB and switched on'
       : 'The light service is not running, so the lights cannot be tested')
     return
@@ -2228,24 +2320,42 @@ function resetBand(pos) {
 // from plain MIDI note-ons (velocity indexes a fixed colour table). midiOutput is
 // only ever the keyboard itself (pickPorts): on any other output these notes would
 // play a synth or a DAW.
+// With two keyboards on two cables, a pitch on the screen is a key on one of them, reached on that
+// one's port at the note it plays there. Where it was lit is kept, so a light that comes off
+// after the keys have moved still goes to the right place.
+const litRoutes = new Map()    // pitch -> [port, note]
+function noteRoute(pitch) {
+  if (!midiInput2) return midiOutput ? [midiOutput, pitch] : null
+  const i = pitch - kbBase(), side = Math.floor(i / 24)
+  if (side !== 0 && side !== 1) return null
+  const played = pair.side.indexOf(side)
+  const out = settings.kbLightsSwap ? 1 - played : played    // the two ports' outputs can come the other way round
+  const port = out ? midiOutput2 : midiOutput
+  return port ? [port, pair.low[played] + i - 24 * side] : null
+}
 function updateNoteLights(desired) {
-  if (!midiOutput) return
+  if (!midiOutput && !midiOutput2) return
   for (const [pitch, vel] of desired) {
     const prev = litNotes.get(pitch)
     if (prev === vel) continue
-    try { midiOutput.send([0x90, pitch, vel & 0x7f]) } catch (_e) {}
+    const was = litRoutes.get(pitch), route = was || noteRoute(pitch)
+    if (!route) continue
+    try { route[0].send([0x90, route[1], vel & 0x7f]) } catch (_e) {}
     litNotes.set(pitch, vel)
+    litRoutes.set(pitch, route)
   }
   for (const pitch of [...litNotes.keys()]) {
     if (desired.has(pitch)) continue
-    try { midiOutput.send([0x80, pitch, 0]) } catch (_e) {}
+    const route = litRoutes.get(pitch)
+    if (route) { try { route[0].send([0x80, route[1], 0]) } catch (_e) {} }
     litNotes.delete(pitch)
+    litRoutes.delete(pitch)
   }
 }
 function clearNoteLights() {
-  if (!midiOutput) return
-  for (const pitch of [...litNotes.keys()]) { try { midiOutput.send([0x80, pitch, 0]) } catch (_e) {} }
+  for (const route of litRoutes.values()) { try { route[0].send([0x80, route[1], 0]) } catch (_e) {} }
   litNotes.clear()
+  litRoutes.clear()
 }
 // Without blocksd the setup's light check and Test lights run a light along the keys with
 // note-ons (each key stays lit for three steps), in under the setup's 1.6 s between
@@ -2254,33 +2364,38 @@ function clearNoteLights() {
 // Returns how long the sweep takes (ms). port: the keyboard's output (the self-test's stand-in).
 const MIDI_SWEEP_MS = 1485
 let midiSweepTimers = []
-const midiSweepLit = new Map()   // pitch -> the port it was lit on
+const midiSweepLit = new Map()   // pitch -> [port, note] it was lit on
 function midiLightSweep(port = midiOutput) {
   for (const t of midiSweepTimers) clearTimeout(t)
   midiSweepTimers = []
   const send = (to, msg) => { try { to.send(msg) } catch (_e) {} }
-  for (const [pitch, litOn] of midiSweepLit) send(litOn, [0x80, pitch, 0])
+  for (const [to, note] of midiSweepLit.values()) send(to, [0x80, note, 0])
   midiSweepLit.clear()
   if (!port) return 0
   const base = kbBase(), keys = kbKeys(), step = MIDI_SWEEP_MS / (keys + 3)
   for (let i = 0; i < keys; i++) {
     const pitch = base + i
     if (pitch < 0 || pitch > 127) continue
-    midiSweepTimers.push(setTimeout(() => { send(port, [0x90, pitch, 127]); midiSweepLit.set(pitch, port) }, i * step))
-    midiSweepTimers.push(setTimeout(() => { send(port, [0x80, pitch, 0]); midiSweepLit.delete(pitch) }, (i + 3) * step))
+    const route = port === midiOutput ? noteRoute(pitch) : [port, pitch]
+    if (!route) continue
+    midiSweepTimers.push(setTimeout(() => { send(route[0], [0x90, route[1], 127]); midiSweepLit.set(pitch, route) }, i * step))
+    midiSweepTimers.push(setTimeout(() => { send(route[0], [0x80, route[1], 0]); midiSweepLit.delete(pitch) }, (i + 3) * step))
   }
   return MIDI_SWEEP_MS
 }
 function runMidiLightTest() {
   if (!midiOutput) { status(!midiInput ? 'No keyboard found: plug it in over USB and switch it on' : canChooseLights() ? 'Choose your keyboard by name in Settings to light its keys' : 'Keylight doesn’t recognise this keyboard, so its keys stay unlit'); return }
   clearLights(midiOutput)
+  if (midiOutput2) clearLights(midiOutput2)
   litNotes.clear()
+  litRoutes.clear()
   const ms = midiLightSweep()
   const btn = $('testLights')
   btn.disabled = true
   btn.textContent = 'Testing…'
   setTimeout(() => {
-    if (midiOutput) { clearLights(midiOutput); litNotes.clear() }
+    if (midiOutput) { clearLights(midiOutput); litNotes.clear(); litRoutes.clear() }
+    if (midiOutput2) clearLights(midiOutput2)
     btn.disabled = false
     btn.textContent = 'Test lights'
     status('Light test done: every key should have lit up, and stuck lights are cleared')
@@ -2455,6 +2570,7 @@ function syncHudButtons() {
   setLbl('lblInst', inst ? inst.short : 'Piano')
   if ($('voiceCount')) $('voiceCount').textContent = String(activeVoiceCount())
   $('btnMetro').classList.toggle('on', settings.metronome)
+  $('btnSheet').classList.toggle('on', settings.sheet)
   setLbl('lblLabels', settings.labels === 'names' ? 'Names' : settings.labels === 'fingers' ? 'Fingers' : 'Labels')
   $('btnLabels').classList.toggle('on', settings.labels !== 'off')
   // the hand actually in use: a lesson, a game or a song without that part plays both
@@ -2866,19 +2982,20 @@ function hideResults() {
 // Keyboard light ceremony: star groups then a streak flash.
 function celebrate(stars) {
   console.log('CEREMONY stars=' + stars + ' daemon=' + (daemon && daemon.ready ? 'ready' : 'absent'))
-  if (!daemon || !daemon.ready) return
-  const off = () => Array.from({ length: 24 }, () => [0, 0, 0])
+  if (!framesDrive()) return
+  const n = lightKeys()
+  const off = () => Array.from({ length: n }, () => [0, 0, 0])
   const seq = []
   if (stars === 0) {
     // fail: red flash, three times
     for (let i = 0; i < 3; i++) {
-      seq.push(() => daemon.send(Array.from({ length: 24 }, () => [225, 110, 115])))
+      seq.push(() => daemon.send(Array.from({ length: n }, () => [225, 110, 115])))
       seq.push(() => daemon.send(off()))
     }
   } else {
     // star rating: gold groups fill in, one per star (~3 s)
     const groups = 5
-    const keysPerGroup = Math.floor(24 / groups)
+    const keysPerGroup = Math.floor(n / groups)
     for (let g = 0; g < groups; g++) {
       seq.push(() => {
         const frame = off()
@@ -2890,7 +3007,7 @@ function celebrate(stars) {
     for (let i = 0; i < 4; i++) {
       seq.push(() => {
         const frame = off()
-        for (let k = 0; k < 24; k++) if ((k + i) % 4 === 0) frame[k] = [0, 165, 130]
+        for (let k = 0; k < n; k++) if ((k + i) % 4 === 0) frame[k] = [0, 165, 130]
         daemon.send(frame)
       })
     }
@@ -2917,7 +3034,8 @@ function logRaw(data) {
   console.log('MIDI raw ' + [...data].map((b) => b.toString(16).padStart(2, '0')).join(' '))
 }
 
-function handleMidiMessage(data) {
+// channelBase: the second keyboard's channels sit above the first's, since both use the same ones
+function handleMidiMessage(data, channelBase = 0) {
   const status = data[0]
   if (status == null || status < 0x80) return
   if (status === 0xf0) {   // device SysEx (config replies etc.) — don't spam the log
@@ -2925,7 +3043,7 @@ function handleMidiMessage(data) {
     return
   }
   const type = status & 0xf0
-  const ch = status & 0x0f
+  const ch = (status & 0x0f) + channelBase
   const d1 = data[1] || 0, d2 = data[2] || 0
   if (type === 0x90 && d2 > 0) { handleNoteOn(d1, d2, ch); return }
   if (type === 0x80 || (type === 0x90 && d2 === 0)) { handleNoteOff(d1, ch); return }
@@ -2965,13 +3083,100 @@ function handleNoteOn(pitch, vel, channel = 0) {
   if (need) checkOctaveMismatch(pitch, need)
   // A long keyboard that can't be moved from here seldom plays a note off the screen, so this
   // is how its octave buttons get noticed outside Wait too.
-  else if (kbKeys() > 24 && !(daemon && daemon.ready) && player.clockRunning) {
+  else if (kbKeys() > 24 && !canMoveOctave() && player.clockRunning) {
     checkOctaveMismatch(pitch, res && res.kind !== 'free' ? new Set([pitch])
       : new Set([...player.activeNotes(), ...player.upcomingNotes()].map((n) => n.pitch).filter((p) => player.keyIndexFor(p) >= 0)))
   }
   if (res && res.kind && ['perfect', 'good', 'early', 'late'].includes(res.kind)) feedback.set(pitch, { kind: res.kind, until: performance.now() + 220 })
 }
 function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('off', pitch, 0, channel); held.delete(pitch); letGoAt.set(pitch, performance.now()) }
+
+// Two keyboards on two cables play as one row of 48 keys. Each sends notes wherever its own octave
+// is, and both may send the same notes on the same channels, so a press is turned into its place in
+// the row: side (0 left, 1 right) and low (the note its far-left key sends) say where each one is.
+const pair = { side: [0, 1], low: [48, 48], down: [new Map(), new Map()], pedal: [false, false] }
+const portKey = (p) => p.id || p.name
+function loadPair() {
+  const a = settings.kbPair[portKey(midiInput)], b = settings.kbPair[portKey(midiInput2)]
+  const known = !!(a && b && a.side !== b.side)
+  pair.side = known ? [a.side, b.side] : [0, 1]
+  pair.low = known ? [a.low, b.low] : [settings.kbZero, settings.kbZero]
+  pair.down = [new Map(), new Map()]
+  pair.pedal = [false, false]
+  console.log('PAIR two keyboards on ' + midiInput.name + ' and ' + midiInput2.name + (known ? ' as set up: sides ' + pair.side + ' from ' + pair.low : ', not set up yet') +
+    ' outputs=' + (midiOutput ? 'yes' : 'no') + ',' + (midiOutput2 ? 'yes' : 'no'))
+  return known
+}
+function savePair() {
+  settings.kbPair = {
+    [portKey(midiInput)]: { side: pair.side[0], low: pair.low[0] },
+    [portKey(midiInput2)]: { side: pair.side[1], low: pair.low[1] }
+  }
+  saveSettings()
+}
+// Which note a key on this keyboard is in the row. A note outside the 24 this keyboard was playing
+// means its own octave buttons moved it.
+function pairPitch(slot, raw) {
+  let low = pair.low[slot]
+  if (raw < low || raw >= low + 24) {
+    while (raw < low) low -= 12
+    while (raw >= low + 24) low += 12
+    console.log('PAIR port ' + (slot + 1) + ' moved its octave: from ' + pair.low[slot] + ' to ' + low)
+    pair.low[slot] = low
+    savePair()
+  }
+  const pitch = kbBase() + 24 * pair.side[slot] + raw - low
+  return pitch >= 0 && pitch <= 127 ? pitch : null
+}
+function pairMessage(slot, data) {
+  const status = data[0]
+  if (status == null || status < 0x80) return
+  const type = status & 0xf0, d1 = data[1] || 0, d2 = data[2] || 0
+  const ch = (status & 0x0f) + 16 * slot
+  if (type === 0x90 && d2 > 0 && status < 0xf0) {
+    const pitch = pairPitch(slot, d1)
+    if (pitch == null) return
+    pair.down[slot].set(d1, pitch)
+    if (setup.open) setup.pressOf.set(pitch, { slot, raw: d1 })
+    handleNoteOn(pitch, d2, ch)
+  } else if (type === 0x80 || type === 0x90) {
+    // the note it was pressed as, even if the keys have moved since
+    const pitch = pair.down[slot].get(d1)
+    if (pitch == null) return
+    pair.down[slot].delete(d1)
+    handleNoteOff(pitch, ch)
+  } else if (type === 0xB0 && d1 === 64) {
+    // either pedal holds the sound: one keyboard letting go doesn't lift the other's
+    pair.pedal[slot] = d2 >= 64
+    logMidi('cc', 64, d2, ch)
+    setSustain(pair.pedal[0] || pair.pedal[1])
+  } else if (type === 0xB0 && (d1 === 120 || d1 === 123)) {
+    for (const [raw, pitch] of pair.down[slot]) { pair.down[slot].delete(raw); handleNoteOff(pitch, ch) }
+  } else if (type === 0xA0) {
+    const pitch = pair.down[slot].get(d1)
+    if (pitch != null && settings.expression) setPolyPressure(pitch, ch, d2 / 127)
+  } else handleMidiMessage(data, 16 * slot)
+}
+// With a light service, each keyboard is held at octave 0 and the row moves in the app, so the two
+// can't drift apart when an octave button is pressed.
+function holdPairOctave() {
+  if (!midiInput2 || !daemon || !daemon.ready) return
+  daemon.setConfig(5, 0)
+  daemon.setConfig(4, 0)
+}
+// Lights land by which keyboard is which, and neither the light service nor the ports say so.
+const canSwapLights = () => (framesDrive() ? daemon.count >= 2 : !!(midiInput2 && midiOutput && midiOutput2))
+function swapLights() {
+  if (framesDrive() && daemon.count >= 2) {
+    settings.kbLightsLeft = daemon.boards[1].serial
+    daemon.setLeft(settings.kbLightsLeft)
+  } else {
+    clearNoteLights()
+    settings.kbLightsSwap = !settings.kbLightsSwap
+  }
+  saveSettings()
+  console.log('PAIR lights swapped')
+}
 
 // The keyboard's ports: one named for it first (LUMI, then any other ROLI name, as a
 // Piano M may show up), else an input that looks like a keyboard: a hardware port,
@@ -2982,6 +3187,7 @@ function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('o
 // is "ROLI Piano", or just "USBMidi2-ACX" on Windows' USB MIDI 2.0 driver, which names every
 // port that way: only someone choosing that port says it is the keyboard.
 const KB_PORT = /lumi|\bpiano m\b/i, KB_MAKER = /roli/i, KB_UNNAMED = /usbmidi2/i
+const TWO_KEYBOARDS = '__two__'     // settings.kbPort: the two likeliest inputs, as one keyboard
 const SOFT_PORT = /\biac\b|\bbus\b|network|session|virtual|\bloop|yoke|through|\bthru\b|rtp/i
 function pickPorts(ins, outs, choice = '') {
   const label = (p) => (p.name || '') + ' ' + (p.manufacturer || '')
@@ -2994,11 +3200,26 @@ function pickPorts(ins, outs, choice = '') {
   ins = [...ins]; outs = [...outs]
   const named = (list, name) => list.find((p) => p && p.name === name && p.state !== 'disconnected') || null
   // The input you chose stays chosen: unplugged, it waits instead of another port taking over.
-  const input = choice ? named(ins, choice) : best(ins, 1)
+  // Two keyboards: Automatic takes two inputs named for the 24-key keyboards. Identical keyboards
+  // have identical names, so a port's place among its namesakes pairs its input with its output.
+  const live = ins.filter((p) => p && p.state !== 'disconnected')
+  // Never a software port, and not when the light service counts just one keyboard (the same one
+  // can show up twice, over USB and Bluetooth). Chosen by hand: anything that could be one of them.
+  const named24 = (p) => rank(p) === 3 && !SOFT_PORT.test(label(p))
+  const serviceSaysOne = !!(daemon && daemon.ready && daemon.count < 2)
+  const likely = choice === TWO_KEYBOARDS ? live.filter((p) => !SOFT_PORT.test(label(p)) && (rank(p) >= 2 || KB_UNNAMED.test(label(p)))).sort((a, b) => rank(b) - rank(a))
+    : !choice && !serviceSaysOne ? live.filter(named24) : []
+  const namesakes = (list, p) => list.filter((q) => q && q.name === p.name && q.state !== 'disconnected')
+  const ownOf = (p) => { const mine = namesakes(outs, p); return mine[Math.max(0, namesakes(ins, p).indexOf(p))] || mine[0] || null }
+  const canLight = (p) => p && (rank(p) >= 2 || (KB_UNNAMED.test(label(p)) && !!choice))
+  if (likely.length >= 2) {
+    const a = ownOf(likely[0]), b = ownOf(likely[1])
+    return { input: likely[0], output: canLight(a) ? a : null, input2: likely[1], output2: canLight(b) && b !== a ? b : null }
+  }
+  const input = choice === TWO_KEYBOARDS ? likely[0] || null : choice ? named(ins, choice) : best(ins, 1)
   if (choice && !input) return { input: null, output: null }
-  const own = input && named(outs, input.name)
-  const lightable = own && (rank(own) >= 2 || (KB_UNNAMED.test(label(own)) && !!choice))
-  return { input, output: lightable ? own : best(outs, 2) }
+  const own = input && ownOf(input)
+  return { input, output: canLight(own) ? own : best(outs, 2) }
 }
 
 // A keyboard that plays but gets no light notes: choosing it by name helps only on that nameless port.
@@ -3009,8 +3230,10 @@ const canChooseLights = () => !!midiInput && KB_UNNAMED.test(midiInput.name || '
 function fillKbPorts() {
   const names = midi ? [...new Set([...midi.inputs.values()].filter((p) => p.state !== 'disconnected').map((p) => p.name))] : []
   const pick = settings.kbPort
-  const options = [['', !pick && midiInput ? 'Automatic (' + midiInput.name + ')' : 'Automatic'], ...names.map((n) => [n, n])]
-  if (pick && !names.includes(pick)) options.push([pick, pick + ' (not connected)'])
+  const inputs = midi ? [...midi.inputs.values()].filter((p) => p.state !== 'disconnected').length : 0
+  const options = [['', !pick && midiInput2 ? 'Automatic (two keyboards)' : !pick && midiInput ? 'Automatic (' + midiInput.name + ')' : 'Automatic'], ...names.map((n) => [n, n])]
+  if (inputs >= 2 || pick === TWO_KEYBOARDS) options.push([TWO_KEYBOARDS, 'Two keyboards as one'])
+  if (pick && pick !== TWO_KEYBOARDS && !names.includes(pick)) options.push([pick, pick + ' (not connected)'])
   const sig = JSON.stringify(options)
   for (const id of ['kbPort', 'obKbPort']) {
     const sel = $(id)
@@ -3029,15 +3252,23 @@ let midiState = null    // what the last 'keylight:midi' event said
 // one found at boot. The onboarding listens for 'keylight:midi'.
 function bindMidiPorts() {
   if (!midi) return
-  const { input, output } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
-  if (input !== midiInput) {
+  const wasTwo = !!midiInput2
+  const { input, output, input2 = null, output2 = null } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
+  if (input !== midiInput || input2 !== midiInput2) {
     if (midiInput) midiInput.onmidimessage = null
+    if (midiInput2) midiInput2.onmidimessage = null
     // the old port's note-offs and pedal-up will never come
     if (held.size || sustainDown()) { stopAll(); setSustain(false); held.clear(); letGoAt.clear() }
     midiInput = input
+    midiInput2 = input2
     lastFarAt = -Infinity
+    if (midiInput2) {
+      midiInput2.onmidimessage = (ev) => pairMessage(1, ev.data)
+      if (!loadPair()) status('Two keyboards found: they now play as one. Run setup again in Settings so Keylight knows which is on the left')
+      holdPairOctave()
+    }
     if (midiInput) {
-      midiInput.onmidimessage = (ev) => handleMidiMessage(ev.data)
+      midiInput.onmidimessage = (ev) => (midiInput2 ? pairMessage(0, ev.data) : handleMidiMessage(ev.data))
       settings.kbLast = portLabel(midiInput)
       // a count chosen with no keyboard plugged in was meant for this one
       if (settings.kbKeysFor[''] && !settings.kbKeysFor[kbLabel()]) settings.kbKeysFor[kbLabel()] = settings.kbKeysFor['']
@@ -3046,16 +3277,18 @@ function bindMidiPorts() {
       if (!player) restoreKeysAt()
     }
   }
-  if (output !== midiOutput) { clearNoteLights(); midiOutput = output; litNotes.clear() }
+  if (output !== midiOutput || output2 !== midiOutput2) { clearNoteLights(); midiOutput = output; midiOutput2 = output2 }
   applyKeyCount()
+  // back to one keyboard: its octave goes back to meaning what the screen says
+  if (wasTwo && !midiInput2) setKeyboardWindow(kbBase())
   fillKbPorts()
   updateKbChip()
-  const detail = { connected: !!midiInput, name: midiInput ? midiInput.name : null }
+  const detail = { connected: !!midiInput, name: midiInput ? midiInput.name + (midiInput2 ? ' + ' + midiInput2.name : '') : null }
   if (midiState && midiState.connected === detail.connected && midiState.name === detail.name) return
   midiState = detail
   const obd = $('obDevice')
-  if (obd) obd.textContent = midiInput ? 'Keyboard connected' : 'No keyboard found — plug in your keyboard'
-  console.log('MIDI keyboard ' + (midiInput ? 'in=' + midiInput.name + ' out=' + (midiOutput ? midiOutput.name : 'none') : 'none') +
+  if (obd) obd.textContent = midiInput2 ? 'Two keyboards connected' : midiInput ? 'Keyboard connected' : 'No keyboard found — plug in your keyboard'
+  console.log('MIDI keyboard ' + (midiInput ? 'in=' + midiInput.name + ' out=' + (midiOutput ? midiOutput.name : 'none') + (midiInput2 ? ' in2=' + midiInput2.name + ' out2=' + (midiOutput2 ? midiOutput2.name : 'none') : '') : 'none') +
     ' (inputs=' + [...midi.inputs.values()].map((p) => p.name + (p.state === 'disconnected' ? ' (gone)' : '')).join('|') + ')')
   window.dispatchEvent(new CustomEvent('keylight:midi', { detail }))
 }
@@ -3074,15 +3307,16 @@ function updateKbChip() {
   if (!chip) return
   const connected = !!midiInput
   chip.classList.toggle('on', connected)
-  const lit = (daemon && daemon.ready) || (noteLightsOnly() && !!midiOutput)
-  $('kbStatusText').textContent = connected ? (lit ? 'Keyboard connected' : 'Keyboard · lights off') : 'No keyboard'
+  const lit = framesDrive() || (noteLightsOnly() && !!midiOutput)
+  const name = midiInput2 ? 'Two keyboards' : 'Keyboard'
+  $('kbStatusText').textContent = connected ? (lit ? name + ' connected' : name + ' · lights off') : 'No keyboard'
   if (noteLightsOnly()) showWindowsLights()
 }
 
 // Windows and the 49-key keyboard: Settings says how the keys light (there is no light service
 // to report on), and the brightness works only with a blocksd someone runs themselves.
 function showWindowsLights() {
-  const ready = !!(daemon && daemon.ready)
+  const ready = framesDrive()
   const el = $('daemonState')
   if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? 'No keyboard found' : 'checking…'
   const b = $('brightness')
@@ -3113,23 +3347,35 @@ let kbSetAt = 0
 let octaveMiss = { offset: 0, pitches: [] }
 const kbBase = () => settings.kbZero + 12 * kbOctave
 
-// How many keys: 24 (Piano M, LUMI Keys) or 49 (ROLI Piano). Each keyboard keeps its own:
+// How many keys: 24 (Piano M, LUMI Keys), 49 (ROLI Piano) or 48 (two 24-key keyboards). Two on two
+// cables are always 48; two joined together share one port, and the light service counts them.
+// Each keyboard keeps its own:
 // what the setup measured, Settings says or its notes showed (settings.kbKeysFor), else its
 // port's name: "ROLI Piano" without the M. Web MIDI gives nothing else to go on. With nothing
 // plugged in the last keyboard's count holds, so unplugging doesn't redraw a song.
 const KB_SIZES = [24, 49]
+const KB_JOINED_SIZES = [24, 48]     // a port named for the 24-key keyboards can only be one or two of them
 const portLabel = (p) => ((p.manufacturer || '') + ' ' + (p.name || '')).trim()
 const kbLabel = () => (midiInput ? portLabel(midiInput) : settings.kbLast)
 const keysFromName = (label) => (/\broli piano\b(?!\s*m\b)/i.test(label) ? 49 : 24)
-const kbKeys = () => settings.kbKeysFor[kbLabel()] || keysFromName(kbLabel())
-// blocksd only drives the 24-key keyboards, so a longer one lights from MIDI notes, as on Windows
-const noteLightsOnly = () => IS_WIN || kbKeys() > 24
+let serviceCountsTwo = false     // kept while the light service restarts, so the screen doesn't jump
+const keysAuto = () => (!settings.kbPort && serviceCountsTwo ? 48 : keysFromName(kbLabel()))
+const kbKeys = () => (midiInput2 ? 48 : settings.kbKeysFor[kbLabel()] || keysAuto())
+const lightKeys = () => (kbKeys() === 48 ? 48 : 24)     // how many keys a frame for the light service has
+// blocksd only drives the 24-key keyboards, so a longer one lights from MIDI notes, as on Windows;
+// two 24-key keyboards it drives one frame each
+const noteLightsOnly = () => IS_WIN || (kbKeys() > 24 && !(kbKeys() === 48 && framesDrive()))
+// Whether the light service does the lighting: on a 48-key row, only if it reaches both keyboards
+const framesDrive = () => !!(daemon && daemon.ready) && (kbKeys() !== 48 || daemon.count >= 2)
+// Whether the app can move the keys' octave itself, through the light service. Not on two
+// keyboards: on two cables the row moves in the app, and nobody knows what two joined ones do.
+const canMoveOctave = () => !!(daemon && daemon.ready) && !midiInput2 && kbKeys() !== 48
 
 // A long keyboard, which the app can't move or ask: the screen always shows where its keys are,
 // as last seen for that keyboard. (24 keys off the light service fit each song instead: a note
 // off so few keys soon shows where they really are.)
 const keysAt = () => settings.kbBaseFor[kbLabel()] ?? settings.kbZero
-const keysStayAt = () => (kbKeys() > 24 && !(daemon && daemon.ready) ? keysAt() : null)
+const keysStayAt = () => (kbKeys() > 24 && !midiInput2 && !canMoveOctave() ? keysAt() : null)
 function rememberKeysAt() {
   if (keysStayAt() == null) return
   settings.kbBaseFor[kbLabel()] = kbBase()
@@ -3164,7 +3410,7 @@ function recheckHands() {
 // so that name keeps deciding; on a nameless port the measurement is all there is.
 function learnKeyCount(keys) {
   const label = kbLabel()
-  if (keys === keysFromName(label) && (keys > 24 || KB_PORT.test(label))) delete settings.kbKeysFor[label]
+  if (keys === keysAuto() && (keys > 24 || KB_PORT.test(label))) delete settings.kbKeysFor[label]
   else settings.kbKeysFor[label] = keys
   if (!player) rememberKeysAt()     // going long: the keys are where the app last followed them
   saveSettings()
@@ -3182,7 +3428,7 @@ function learnLengthFromNotes(pitch) {
   const now = performance.now()
   const far = [...pressedAt].filter(([p, at]) => now - at < NOTES_TOGETHER_MS && Math.abs(p - pitch) > 24).map(([p]) => p)
   pressedAt.set(pitch, now)
-  if (!far.length || !midiInput || (daemon && daemon.ready) || settings.kbKeysFor[kbLabel()] || kbKeys() > 24 || KB_PORT.test(kbLabel())) return
+  if (!far.length || !midiInput || midiInput2 || (daemon && daemon.ready) || settings.kbKeysFor[kbLabel()] || kbKeys() > 24 || KB_PORT.test(kbLabel())) return
   const gap = now - lastFarAt
   if (gap < NOTES_TOGETHER_MS) return     // still the same moment
   lastFarAt = now
@@ -3211,15 +3457,17 @@ function applyKeyCount() {
     }
   }
   const box = $('obKeys')
-  const whites = keys === 49 ? 29 : 14
+  const whites = keys === 49 ? 29 : keys === 48 ? 28 : 14
   if (box.children.length !== whites || !box.style.length) {
     box.replaceChildren(...Array.from({ length: whites }, (_, i) => { const k = document.createElement('i'); k.style.setProperty('--i', i); return k }))
     box.style.setProperty('--white-keys', whites)
     box.classList.toggle('long', keys > 24)
     setup.glow = new Array(whites).fill(0)
   }
-  $('kbKeys').value = String(settings.kbKeysFor[kbLabel()] || 0)
-  $('kbKeys').options[0].textContent = 'Automatic (' + keysFromName(kbLabel()) + ' keys)'
+  $('kbKeys').value = String(midiInput2 ? 48 : settings.kbKeysFor[kbLabel()] || 0)
+  $('kbKeys').disabled = !!midiInput2
+  $('kbKeys').options[0].textContent = 'Automatic (' + keysAuto() + ' keys)'
+  $('swapRow').classList.toggle('hidden', !canSwapLights())
   if (!IS_WIN) {
     $('lightsLabel').textContent = noteLightsOnly() ? 'Key lights' : 'Light service'
     if (!noteLightsOnly()) { $('brightness').disabled = false; $('brightness').title = ''; showDaemonState() }
@@ -3232,7 +3480,7 @@ function applyKeyCount() {
 function setKeyboardWindow(start) {
   kbOctave = Math.max(-4, Math.min(5, Math.round((start - settings.kbZero) / 12)))
   kbSetAt = performance.now()
-  if (daemon && daemon.ready) {
+  if (canMoveOctave()) {
     daemon.setConfig(5, 0)          // transpose off: keys play plain octaves
     daemon.setConfig(4, kbOctave)
   }
@@ -3244,8 +3492,21 @@ function setKeyboardWindow(start) {
 // The octave − / + (HUD, Settings, Z / X and the keyboard's own buttons). The keys get a
 // sweep that travels the way they moved.
 function shiftOctave(delta) {
+  // two keyboards on two cables: the row moves here, and an octave button that also moved a
+  // keyboard is put back
+  if (midiInput2) {
+    const to = kbBase() + 12 * delta
+    if (to < 0 || to + kbKeys() - 1 > 127) { status('The keys are already at their ' + (delta < 0 ? 'lowest' : 'highest') + ' octave'); return }
+    holdPairOctave()
+    setKeyboardWindow(to)
+    if (song) song.fitStart = kbBase()
+    octaveSweepAt = performance.now()
+    octaveSweepDir = Math.sign(delta)
+    status('Keys now play ' + keysRange())
+    return
+  }
   // without the light service the app can't move the keyboard's octave, only follow it
-  if (!daemon || !daemon.ready) {
+  if (!canMoveOctave()) {
     // a long keyboard seldom plays a note off the screen, so this is how to line the screen up with it
     if (kbKeys() > 24) {
       const to = kbBase() + 12 * delta
@@ -3276,13 +3537,13 @@ function syncOctaveUI() {
   syncKbRange()
   // the device octave runs from -4 to 5 (setKeyboardWindow)
   for (const id of ['btnOctDown', 'setOctDown']) if ($(id)) $(id).disabled = kbOctave <= -4
-  for (const id of ['btnOctUp', 'setOctUp']) if ($(id)) $(id).disabled = kbOctave >= 5
+  for (const id of ['btnOctUp', 'setOctUp']) if ($(id)) $(id).disabled = kbOctave >= 5 || (!!midiInput2 && kbBase() + 12 + kbKeys() - 1 > 127)
 }
 
 // Our idea of the keys' range was off by `shift` semitones: fix the calibration
 // and put the keyboard back on the window the song wants.
 function recalibrate(shift, reason) {
-  if (!daemon || !daemon.ready) {
+  if (!canMoveOctave()) {
     // We can't move the keyboard's octave right now, so we don't know it either:
     // follow the keys without saving a calibration.
     if (kbBase() + shift < 0) return
@@ -3316,6 +3577,7 @@ function calibrateFromNote(pitch) {
 // two different notes in a row (or the only wanted note, three times running):
 // the keys are shifted by an octave. One repeated slip doesn't count.
 function checkOctaveMismatch(pitch, need) {
+  if (midiInput2) return    // every press is placed exactly: an octave off is just the wrong key
   if (need.has(pitch)) { octaveMiss = { offset: 0, pitches: [] }; return }
   const offset = need.has(pitch - 12) ? 12 : need.has(pitch + 12) ? -12 : 0
   if (!offset) { octaveMiss = { offset: 0, pitches: [] }; return }
@@ -3326,7 +3588,7 @@ function checkOctaveMismatch(pitch, need) {
   // keyboard has an octave-off key within easy reach of a plain slip, so it takes one press more.
   const more = kbKeys() > 24 ? 1 : 0
   if ((octaveMiss.pitches.length >= 2 && octaveMiss.presses >= 2 + more) || (need.size === 1 && octaveMiss.presses >= 3 + more)) {
-    status(daemon && daemon.ready ? 'Your keys seemed an octave off, so I moved them' : 'Your keys seemed an octave off, so I moved the screen to match')
+    status(canMoveOctave() ? 'Your keys seemed an octave off, so I moved them' : 'Your keys seemed an octave off, so I moved the screen to match')
     octaveMiss = { offset: 0, pitches: [] }
     recalibrate(offset, 'two different notes played an octave ' + (offset > 0 ? 'above' : 'below') + ' the target')
   }
@@ -3339,20 +3601,46 @@ function showDaemonState() {
   if (el) el.textContent = state === 'connected' || state === 'rejected' ? 'Connected' : state === 'no-device' ? 'Running, no keyboard found'
     : state === 'unavailable' || state === 'disconnected' ? 'Not running' : state === 'checking' ? 'checking…' : state
 }
+// The light service sees a different number of keyboards. Its order changes with replugging, so
+// the first order seen is kept as left and right until someone swaps them.
+function serviceBoardsChanged() {
+  const two = daemon.count >= 2
+  if (two && !settings.kbLightsLeft && daemon.boards[0].serial) {
+    settings.kbLightsLeft = daemon.boards[0].serial
+    saveSettings()
+    daemon.setLeft(settings.kbLightsLeft)
+  }
+  const changed = two !== serviceCountsTwo
+  serviceCountsTwo = two
+  if (midi) bindMidiPorts()      // two inputs may now be, or stop being, two keyboards
+  holdPairOctave()
+  if (changed) applyKeyCount()
+}
 function initDaemon() {
   daemon = new LedDaemon((state, info, device) => {
     if (state === 'info') { showKeyboardInfo(info); return }   // a battery update from the same keyboard
+    // a second keyboard came or went, the first still being driven
+    if (state === 'boards') {
+      console.log('LED daemon keyboards=' + daemon.count)
+      serviceBoardsChanged()
+      daemon.brightness(settings.brightness)
+      applyDeviceMode()
+      return
+    }
     daemonState = state
     showDaemonState()
     updateKbChip()
     if (state !== 'rejected') showKeyboardInfo(state === 'connected' ? device : null)
+    if (state === 'no-device' && serviceCountsTwo) { serviceCountsTwo = false; if (midi) bindMidiPorts(); applyKeyCount() }
     if (state === 'connected') {
       console.log('LED daemon ready device=' + (info || '?'))
       daemon.brightness(settings.brightness)
+      serviceBoardsChanged()
       applyDeviceMode()
       setKeyboardWindow(player && song ? (song.fitStart ?? player.windowStart) : kbBase())
     } else console.log('LED daemon: ' + state)
   }, handleKeyButton, onDeviceConfig)
+  daemon.setLeft(settings.kbLightsLeft)
   daemon.connect()
 }
 
@@ -3515,7 +3803,7 @@ function noteRgb(n, style = lightStyle()) {
 }
 // Colour of a key you press (key index i on the 24-key row).
 function pressRgb(pitch, i, style = lightStyle()) {
-  if (style === 'Pro') return hexToRgb(i < 12 ? COLORS.hand.left : COLORS.hand.right)
+  if (style === 'Pro') return hexToRgb(i < lightKeys() / 2 ? COLORS.hand.left : COLORS.hand.right)
   return noteRgb({ pitch }, style)
 }
 // What a key shows when nothing is happening on it (key index i on the row).
@@ -3530,7 +3818,7 @@ const brighter = (a, b) => a.map((v, c) => Math.max(v, b[c]))
 // a quarter second after you let go.
 function drawPlayedKeys(frame, base, level = 1) {
   const now = performance.now()
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < frame.length; i++) {
     const pitch = base + i
     if (held.has(pitch)) { frame[i] = dimRgb(pressRgb(pitch, i), level); continue }
     const t = letGoAt.get(pitch)
@@ -3544,8 +3832,8 @@ function drawPlayedKeys(frame, base, level = 1) {
 function drawStylePreview(frame, base) {
   const t = (performance.now() - stylePreviewAt) / 520
   if (t < 0 || t > 1) return
-  for (let i = 0; i < 24; i++) {
-    const k = Math.max(0, 1 - Math.abs(t * 30 - 3 - i) / 3)
+  for (let i = 0; i < frame.length; i++) {
+    const k = Math.max(0, 1 - Math.abs(t * (frame.length + 6) - 3 - i) / 3)
     if (k > 0) frame[i] = brighter(frame[i], dimRgb(pressRgb(base + i, i), k))
   }
 }
@@ -3556,9 +3844,9 @@ let octaveSweepDir = 0
 function drawOctaveSweep(frame, base) {
   const t = (performance.now() - octaveSweepAt) / 480
   if (!octaveSweepDir || t < 0 || t > 1) return
-  const head = t * 31 - 3
-  for (let i = 0; i < 24; i++) {
-    const d = head - (octaveSweepDir > 0 ? i : 23 - i)     // how far behind the head this key is
+  const head = t * (frame.length + 7) - 3
+  for (let i = 0; i < frame.length; i++) {
+    const d = head - (octaveSweepDir > 0 ? i : frame.length - 1 - i)     // how far behind the head this key is
     const k = d < 0 ? Math.max(0, 1 + d) : Math.max(0, 1 - d / 5)
     if (k > 0) frame[i] = brighter(frame[i], dimRgb(pressRgb(base + i, i), k))
   }
@@ -3566,7 +3854,7 @@ function drawOctaveSweep(frame, base) {
 // The setup's keyboard step pulses the end key to press next (key 0, then key 23)
 function drawSetupGuide(frame, base) {
   if (!setup.open || SETUP_STEPS[setup.step] !== 'keyboard' || setup.rangeDone || !midiInput) return
-  const i = setup.lowKey == null ? 0 : 23
+  const i = setup.lowKey == null ? 0 : frame.length - 1
   const k = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(performance.now() / 160))
   frame[i] = brighter(frame[i], dimRgb(pressRgb(base + i, i), k))
 }
@@ -3574,7 +3862,7 @@ function drawSetupGuide(frame, base) {
 // whatever you play.
 function restFrame() {
   const base = kbBase()
-  const frame = Array.from({ length: 24 }, (_, i) => restRgb(base + i, i))
+  const frame = Array.from({ length: lightKeys() }, (_, i) => restRgb(base + i, i))
   drawPlayedKeys(frame, base)
   drawStylePreview(frame, base)
   drawOctaveSweep(frame, base)
@@ -3583,13 +3871,13 @@ function restFrame() {
 }
 
 function buildKeyFrame(s) {
-  const frame = Array.from({ length: 24 }, () => [0, 0, 0])
+  const frame = Array.from({ length: lightKeys() }, () => [0, 0, 0])
   const now = performance.now()
   if (freeplay) {
     // Playground: the scale's keys glow faintly in the style's colour, the root brighter
     const scale = freeScalePcs()
     const base = kbBase()
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < frame.length; i++) {
       const pitch = base + i
       const pc = ((pitch % 12) + 12) % 12
       if (pc === freeRoot) frame[i] = dimRgb(pressRgb(pitch, i), 0.45)
@@ -3604,7 +3892,7 @@ function buildKeyFrame(s) {
   const snap = s.snapshot
   const mode = lightStyle()
   const ws = s.windowStart
-  const put = (pitch, rgb) => { const i = pitch - ws; if (i >= 0 && i < 24) frame[i] = rgb }
+  const put = (pitch, rgb) => { const i = pitch - ws; if (i >= 0 && i < frame.length) frame[i] = rgb }
 
   // count-in: show where the first notes are and pulse them on every beat
   const ac = audioContext()
@@ -3657,6 +3945,7 @@ function resize() {
   // again when the take ends (syncRecPill)
   const locked = isRecording() && (w !== canvas.width || h !== canvas.height)
   canvas.classList.toggle('take-locked', locked)
+  if (!$('sheetStrip').classList.contains('hidden')) sheet.place()
   if (locked) return
   canvas.width = w
   canvas.height = h
@@ -3666,7 +3955,7 @@ function resize() {
 
 // Send a key frame only when it changed (the daemon is ACK-gated anyway).
 function sendKeys(frame) {
-  if (!daemon || !daemon.ready || frame.join('|') === daemon.lastSig) return
+  if (!framesDrive() || frame.join('|') === daemon.lastSig) return
   daemon.send(frame)
 }
 
@@ -3755,9 +4044,10 @@ function frame(ts) {
   pumpAudio()
   syncRecording()
   updateLyrics(snap.position)
+  updateSheet(snap.position)
 
   // lights
-  if (!daemon || !daemon.ready) {
+  if (!framesDrive()) {
     const desired = new Map()
     if (midiOutput) {
       const activeP = new Set(snap.activeNotes.map((n) => n.pitch))
@@ -4892,7 +5182,287 @@ async function runSelfTest() {
       }
     }
 
-    console.log('SELFTEST done')
+    // ---------- two keyboards ----------
+  // Real MIDI bytes through stand-in ports. Skipped with a light service: it could move real keys.
+  if (!daemon) {
+    const check = (what, ok, got) => console.log('SELFTEST two keyboards ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const keep = { midi, midiInput, midiOutput, midiInput2, midiOutput2, player, song, kbOctave, kbPort: settings.kbPort, kbKeysFor: settings.kbKeysFor, kbBaseFor: settings.kbBaseFor, kbPair: settings.kbPair, kbZero: settings.kbZero, kbLast: settings.kbLast, kbLightsSwap: settings.kbLightsSwap, step: setup.step, open: setup.open }
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+    const port = (id, name = 'LUMI Keys BLOCK') => ({ id, name, manufacturer: 'ROLI', state: 'connected', sent: [], onmidimessage: null, send(m) { this.sent.push([...m]) } })
+    let ins, outs
+    const plug = (inList, outList) => {
+      ins = inList; outs = outList
+      midi = { inputs: new Map(ins.map((p) => [p.id, p])), outputs: new Map(outs.map((p) => [p.id, p])) }
+      bindMidiPorts()
+    }
+    const bytes = (i, ...b) => ins[i].onmidimessage({ data: new Uint8Array(b) })
+    const twins = () => plug([port('in-a'), port('in-b')], [port('out-a'), port('out-b')])
+    try {
+      Object.assign(settings, { kbPort: '', kbKeysFor: {}, kbBaseFor: {}, kbPair: {}, kbZero: 48, kbLast: '', kbLightsSwap: false })
+      kbOctave = 0; midiInput = null; midiOutput = null; midiInput2 = null; midiOutput2 = null; player = null; song = null
+      held.clear(); letGoAt.clear()
+      plug([port('in-a')], [port('out-a')])
+      check('one keyboard stays one keyboard', !midiInput2 && kbKeys() === 24 && midiInput === ins[0] && midiOutput === outs[0])
+      twins()
+      check('two named inputs pair up with their own outputs', midiInput === ins[0] && midiInput2 === ins[1] && midiOutput === outs[0] && midiOutput2 === outs[1] && kbKeys() === 48)
+      check('both are heard', !!ins[0].onmidimessage && !!ins[1].onmidimessage)
+      // both at the same octave, by default: the right one continues the left
+      bytes(0, 0x90, 60, 100); bytes(1, 0x90, 60, 100)
+      check('same note from each is two keys in the row', held.has(60) && held.has(84), [...held].join(','))
+      check('two voices, on separate channels', !!voiceState(0, 60) && !!voiceState(16, 84))
+      bytes(0, 0xe0, 0, 127)
+      check('one keyboard\'s bend leaves the other alone', voiceState(0, 60).bend !== voiceState(16, 84).bend, voiceState(0, 60).bend + ' vs ' + voiceState(16, 84).bend)
+      bytes(0, 0x80, 60, 0)
+      check('letting go on one keeps the other sounding', !held.has(60) && held.has(84) && !!voiceState(16, 84))
+      bytes(1, 0x80, 60, 0)
+      check('and then the other', held.size === 0)
+      // one pedal let go doesn't lift the other
+      bytes(0, 0xb0, 64, 127); bytes(1, 0xb0, 64, 127); bytes(1, 0xb0, 64, 0)
+      check('a pedal held on one stays down', sustainDown())
+      bytes(0, 0xb0, 64, 0)
+      check('and comes up when both have let go', !sustainDown())
+      // a note let go after the row moved still ends the note it started
+      bytes(1, 0x90, 50, 100)
+      const started = [...held][0]
+      setKeyboardWindow(kbBase() + 12)
+      bytes(1, 0x80, 50, 0)
+      check('a key let go after moving ends the right note', !held.has(started) && held.size === 0, started)
+      setKeyboardWindow(48)
+      // the right-hand keyboard's own octave button: its notes come from elsewhere now
+      bytes(1, 0x90, 80, 100); bytes(1, 0x80, 80, 0)
+      check('a keyboard that moved itself is followed', pair.low[1] === 60 || pair.low[1] === 72, pair.low[1])
+      pair.low = [48, 48]
+      // setup: which port pressed what says which is where, here plugged the other way round and an octave apart
+      setup.open = true; setup.step = SETUP_STEPS.indexOf('keyboard')
+      Object.assign(setup, { lowKey: null, wrongKey: null, rangeDone: false, otherKeyboard: false })
+      const press = (i, raw) => { bytes(i, 0x90, raw, 100); const p = [...setup.pressOf.keys()].pop(); onSetupKey([...held].pop()); bytes(i, 0x80, raw, 0); return p }
+      press(1, 50)
+      check('setup wants a C first', setup.lowKey == null && setup.wrongKey != null)
+      press(1, 48)
+      check('setup takes the far-left key', setup.lowKey != null && !setup.rangeDone)
+      press(1, 59)
+      check('setup says when it\'s the same keyboard', setup.otherKeyboard && !setup.rangeDone)
+      pair.low = [60, 48]     // the left-hand port's keys sit an octave higher
+      press(0, 83)
+      check('setup finishes with one press on each', setup.rangeDone && pair.side[1] === 0 && pair.side[0] === 1 && pair.low[1] === 48 && pair.low[0] === 60, 'sides ' + pair.side + ' from ' + pair.low)
+      setup.open = false
+      setKeyboardWindow(48)
+      bytes(1, 0x90, 48, 100); bytes(0, 0x90, 60, 100)
+      check('its far-left key is the row\'s first, the other\'s first is 24 on', held.has(48) && held.has(72), [...held].join(','))
+      bytes(1, 0x80, 48, 0); bytes(0, 0x80, 60, 0)
+      // lights go to the keyboard that key is on, at the note it plays there
+      for (const o of outs) o.sent.length = 0
+      updateNoteLights(new Map([[50, 127], [75, 110]]))
+      check('light notes go to the right keyboard', JSON.stringify(outs[1].sent) === '[[144,50,127]]' && JSON.stringify(outs[0].sent) === '[[144,63,110]]', JSON.stringify(outs[0].sent) + ' ' + JSON.stringify(outs[1].sent))
+      updateNoteLights(new Map())
+      check('and come off there', outs[1].sent.at(-1)[0] === 128 && outs[0].sent.at(-1)[0] === 128 && !litNotes.size)
+      swapLights()
+      for (const o of outs) o.sent.length = 0
+      updateNoteLights(new Map([[50, 127]]))
+      check('swapping sends them to the other, for the key on the same keyboard', JSON.stringify(outs[0].sent) === '[[144,50,127]]' && !outs[1].sent.length, JSON.stringify(outs[0].sent))
+      updateNoteLights(new Map())
+      swapLights()
+      check('what setup found is kept', settings.kbPair['in-b'] && settings.kbPair['in-b'].side === 0 && settings.kbPair['in-a'].low === 60, JSON.stringify(settings.kbPair))
+      // a song fits the 48 keys and the row moves to it
+      song = await loadSongFile({ name: 'fur-elise.xml', text: async () => (await fetch('songs/fur-elise.xml')).text() })
+      song.file = 'fur-elise.xml'
+      startSong()
+      check('the screen shows 48 keys', player.windowKeys === 48 && kbKeys() === 48)
+      check('and the song is on them', song.notes.every((n) => n.pitch >= kbBase() && n.pitch < kbBase() + 48), keysRange())
+      const sendBase = kbBase()
+      bytes(1, 0x90, 48, 100)
+      check('the far-left key plays where the row starts', held.has(sendBase), sendBase)
+      bytes(1, 0x80, 48, 0)
+      shiftOctave(1)
+      check('− and + move the row', kbBase() === sendBase + 12)
+      shiftOctave(-1)
+      for (let i = 0; i < 12; i++) shiftOctave(1)
+      check('the row stops at the top of MIDI', kbBase() + 47 <= 127 && kbOctave <= 5, kbBase())
+      setKeyboardWindow(48)
+      player.pause?.()
+      showScreen('home')
+      player = null; song = null
+      // unplugging one leaves the other playing as 24 keys
+      plug([ins[0]], [outs[0]])
+      check('unplugging one leaves a 24-key keyboard', !midiInput2 && kbKeys() === 24 && midiInput === ins[0] && $('kbKeys').disabled === false)
+      bytes(0, 0x90, 60, 100)
+      check('which plays its plain notes', held.has(60))
+      bytes(0, 0x80, 60, 0)
+      // a chosen port means one keyboard, even with two plugged in
+      twins()
+      settings.kbPort = 'LUMI Keys BLOCK'
+      bindMidiPorts()
+      check('choosing a port by name means just that one', !midiInput2 && kbKeys() === 24)
+      settings.kbPort = TWO_KEYBOARDS
+      plug([port('a', 'USBMidi2-ACX'), port('b', 'USBMidi2-ACX')], [port('oa', 'USBMidi2-ACX'), port('ob', 'USBMidi2-ACX')])
+      check('Two keyboards as one works on nameless ports too', !!midiInput2 && !!midiOutput2 && kbKeys() === 48)
+      settings.kbPort = ''
+      plug([port('a', 'USBMidi2-ACX'), port('b', 'USBMidi2-ACX')], [port('oa', 'USBMidi2-ACX'), port('ob', 'USBMidi2-ACX')])
+      check('Automatic never pairs nameless ports', !midiInput2 && kbKeys() === 24)
+      plug([port('l'), port('iac', 'IAC Driver Bus 1')], [port('ol')])
+      check('a software bus is never the second keyboard', !midiInput2)
+      plug([port('l'), port('thru', 'LUMI Thru')], [port('ol')])
+      check('nor is a software port named for the keyboard', !midiInput2)
+      settings.kbPort = TWO_KEYBOARDS
+      plug([port('l'), { ...port('other', 'Audio Interface MIDI'), manufacturer: '' }], [port('ol')])
+      check('Two keyboards as one won\'t pair with some other device', !midiInput2 && kbKeys() === 24)
+      settings.kbPort = ''
+      // the second keyboard arriving half way through the setup's keyboard step
+      plug([port('in-a')], [port('out-a')])
+      setup.open = true; setup.step = SETUP_STEPS.indexOf('keyboard')
+      Object.assign(setup, { lowKey: 48, lowPress: null, wrongKey: null, rangeDone: false, otherKeyboard: false })
+      twins()
+      bytes(0, 0x90, 60, 100); onSetupKey([...held].pop()); bytes(0, 0x80, 60, 0)
+      check('a keyboard arriving during setup doesn\'t break it', !!setup.lowPress)
+      setup.open = false
+      setup.lowKey = null; setup.lowPress = null
+      // the light service counting one keyboard rules out a pair (the same one over USB and Bluetooth)
+      const realDaemon = daemon
+      daemon = { ready: true, count: 1, boards: [{ serial: 'A' }], setConfig() {}, brightness() {}, setLeft() {}, send() {}, lastSig: '' }
+      twins()
+      check('the light service counting one means one keyboard', !midiInput2 && kbKeys() === 24)
+      plug([port('in-a')], [port('out-a')])
+      settings.kbKeysFor[kbLabel()] = 48
+      check('48 keys it can\'t fully reach light from notes', !framesDrive() && noteLightsOnly())
+      delete settings.kbKeysFor[kbLabel()]
+      daemon = realDaemon
+      // joined with the magnetic connector: one port, 48 keys, found by the two end keys
+      plug([port('in-a')], [port('out-a')])
+      check('joined: 47 apart is two keyboards on a named port', readEndKeys(48, 95, 48, KB_JOINED_SIZES).keys === 48)
+      check('a 49-key keyboard is not taken for one', !readEndKeys(36, 83, 36, KB_SIZES).done)
+      learnKeyCount(48)
+      check('joined: 48 keys, and the screen stays with the keys', kbKeys() === 48 && keysStayAt() != null && !midiInput2, kbKeys())
+      check('joined: the drawn keyboard has 28 white keys', $('obKeys').children.length === 28, $('obKeys').children.length)
+      learnKeyCount(24)
+      check('and a lone keyboard goes back to 24', kbKeys() === 24 && !settings.kbKeysFor[kbLabel()])
+
+      // the light service with two keyboards: a stand-in socket and the real client
+      const sentWs = []
+      const statuses = []
+      const d = new LedDaemon((s) => statuses.push(s))
+      d.ws = { readyState: 1, send: (m) => sentWs.push(m) }
+      const dev = (serial, keys = 24) => '{"uid":' + (serial === 'A' ? '8084980576615729646' : serial === 'B' ? '8549009777750086853' : '7000000000000000001') + ',"serial":"' + serial + '","block_type":"lumi_keys","key_count":' + keys + ',"battery_level":31}'
+      const discover = (...ds) => d.handle('{"type":"discover_response","devices":[' + ds.join(',') + '],"id":"lumi-app"}')
+      const ack = (uid) => d.handle('{"type":"key_frame_ack","uid":' + uid + ',"accepted":true}')
+      discover(dev('A'))
+      check('service: one keyboard is one', d.count === 1 && d.ready && statuses.at(-1) === 'connected')
+      d.send(Array.from({ length: 24 }, () => [1, 2, 3]))
+      check('service: one frame, for it', sentWs.filter((m) => m.includes('key_frame')).length === 1 && sentWs.at(-1).includes('8084980576615729646'))
+      discover(dev('A'), dev('Z', 0), dev('B'))
+      check('service: a second keyboard joins, and other blocks don\'t', d.count === 2 && statuses.at(-1) === 'boards', d.count)
+      ack('8084980576615729646')
+      sentWs.length = 0
+      const row = Array.from({ length: 48 }, (_, i) => (i < 24 ? [10, 0, 0] : [0, 20, 0]))
+      d.send(row)
+      const frames = sentWs.filter((m) => m.includes('key_frame'))
+      const px = (m) => atob(JSON.parse(m.replace(/"uid":\d+/, '"uid":0')).pixels).charCodeAt(0)
+      check('service: 48 keys become a frame each', frames.length === 2 && frames[0].includes('8084980576615729646') && px(frames[0]) === 10 && frames[1].includes('8549009777750086853') && px(frames[1]) === 0 && atob(JSON.parse(frames[1].replace(/"uid":\d+/, '"uid":0')).pixels).charCodeAt(1) === 20)
+      sentWs.length = 0
+      d.send(row)
+      check('service: each waits for its own answer', !sentWs.length)
+      ack('8549009777750086853')
+      check('service: an answer lets that one go on', sentWs.length === 1 && sentWs[0].includes('8549009777750086853'), sentWs.length)
+      d.setLeft('B')
+      check('service: the one named left goes first', d.uidText === '8549009777750086853')
+      sentWs.length = 0
+      d.setConfig(4, 0)
+      check('service: config goes to both', sentWs.length === 2)
+      d.handle('{"type":"device_removed","uid":8084980576615729646,"reason":"disconnected"}')
+      check('service: one leaving keeps the other', d.count === 1 && d.ready && statuses.at(-1) === 'boards')
+      d.handle('{"type":"device_removed","uid":8549009777750086853,"reason":"disconnected"}')
+      check('service: both gone', !d.ready && statuses.at(-1) === 'no-device')
+      discover(dev('A'), dev('B'))
+      ack('8084980576615729646'); ack('8549009777750086853')
+      sentWs.length = 0
+      d.send(Array.from({ length: 24 }, () => [9, 9, 9]))
+      check('service: a 24-key frame leaves the other keyboard dark, not frozen', sentWs.length === 2 && atob(JSON.parse(sentWs[1].replace(/"uid":\d+/, '"uid":0')).pixels).charCodeAt(0) === 0)
+      ack('8084980576615729646'); ack('8549009777750086853')
+      sentWs.length = 0
+      d.send(Array.from({ length: 24 }, () => [8, 8, 8]))
+      check('service: and only once', sentWs.length === 1)
+      d.close()
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally {
+      if (midiInput) midiInput.onmidimessage = null
+      if (midiInput2) midiInput2.onmidimessage = null
+      stopAll(); setSustain(false); held.clear(); letGoAt.clear(); litNotes.clear(); litRoutes.clear()
+      Object.assign(settings, { kbPort: keep.kbPort, kbKeysFor: keep.kbKeysFor, kbBaseFor: keep.kbBaseFor, kbPair: keep.kbPair, kbZero: keep.kbZero, kbLast: keep.kbLast, kbLightsSwap: keep.kbLightsSwap })
+      ;({ midi, midiInput, midiOutput, midiInput2, midiOutput2, player, song, kbOctave } = keep)
+      setup.step = keep.step; setup.open = keep.open
+      applyKeyCount()
+      saveSettings()
+    }
+  } else console.log('SELFTEST two keyboards: skipped, a light service is running')
+
+  // ---------- sheet music ----------
+  {
+    const check = (what, ok, got) => console.log('SELFTEST sheet ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    // a bar played twice appears twice, and the line doesn't slide across the music at a repeat
+    const rows = [{ measure: 0, quarters: 0, x: 10 }, { measure: 0, quarters: 2, x: 20 }, { measure: 1, quarters: 0, x: 30 }, { measure: 2, quarters: 0, x: 40 }]
+    const tl = playedTimeline(rows, { order: [0, 1, 0, 1, 2], starts: [0, 4, 8, 12, 16], tempo: [{ beat: 0, bpm: 60 }, { beat: 8, bpm: 120 }] })
+    check('played order and tempo', tl.length === 7 && tl[3].t === 8 && tl[3].x === 10 && tl[4].t === 9 && tl[6].t === 12, tl.map((r) => r.t).join(','))
+    check('glides between positions', timelineX(tl, 1) === 15, timelineX(tl, 1))
+    check('holds before a repeat', timelineX(tl, 7) === 30, timelineX(tl, 7))
+    check('before the start and after the end', timelineX(tl, -1) === 10 && timelineX(tl, 99) === 40)
+    const volta = playedTimeline([{ measure: 0, quarters: 0, x: 10 }, { measure: 1, quarters: 0, x: 20 }, { measure: 2, quarters: 0, x: 30 }, { measure: 3, quarters: 0, x: 40 }], { order: [0, 1, 0, 3], starts: [0, 4, 8, 12], tempo: [{ beat: 0, bpm: 60 }] })
+    check('holds before a jump forward over a volta', timelineX(volta, 10) === 10, timelineX(volta, 10))
+
+    const wasSheet = settings.sheet
+    settings.sheet = false
+    await openLibrary('twinkle.xml')
+    check('the button shows for a score, the strip stays off', !$('btnSheet').classList.contains('hidden') && $('sheetStrip').classList.contains('hidden'))
+    const stageBefore = canvas.parentElement.clientHeight
+    $('btnSheet').click()
+    check('turning it on shows the strip', settings.sheet && !$('sheetStrip').classList.contains('hidden') && $('btnSheet').classList.contains('on'))
+    check('the stage makes room, hiding no notes', canvas.parentElement.clientHeight === stageBefore - $('sheetStrip').offsetHeight, canvas.parentElement.clientHeight)
+    const drawn = async (s) => { for (let i = 0; i < 300 && sheet.score !== s; i++) await new Promise((r) => setTimeout(r, 20)); return sheet.score === s }
+    check('draws the score', await drawn(song.score) && !!$('sheetMusic').querySelector('svg'))
+    check('at full size, not an icon\'s', $('sheetMusic').querySelector('svg').getBoundingClientRect().width > 500, $('sheetMusic').querySelector('svg').getBoundingClientRect().width)
+    const lastX = () => sheet.timeline[sheet.timeline.length - 1].x
+    check('every position is on the line, left to right', sheet.timeline.length >= song.notes.length * 0.5 && sheet.timeline.every((r, i, a) => !i || r.x >= a[i - 1].x), sheet.timeline.length)
+    // the marker agrees with the notes: each note starts at a position on the line
+    const near = (t) => sheet.timeline.some((r) => Math.abs(r.t - t) < 0.002)
+    check('every note starts at a marked position', song.notes.every((n) => near(n.start)))
+    const moved = (pos) => { sheet.update(pos); return $('sheetMusic').style.transform }
+    const atStart = moved(0)
+    const later = moved(song.bars[3])
+    check('the line slides with the song', atStart !== later && atStart.includes('translate3d'), later)
+    check('nothing is touched when nothing moved', moved(song.bars[3]) === later)
+    // position alone drives it, so speed, Wait and the loop need nothing of their own; a seek shows it
+    player.seek(song.bars[2])
+    check('a seek lands on that bar', Math.abs(timelineX(sheet.timeline, player.currentPosition()) - timelineX(sheet.timeline, song.bars[2])) < 60)
+    let everySong = 0, bad = []
+    for (const l of LIBRARY) {
+      const r = await fetch('songs/' + l.file)
+      const s = await loadSongFile({ name: l.file, text: () => r.text() })
+      try {
+        await sheet.show(s.score)
+        const ok = sheet.score === s.score && s.notes.every((n) => sheet.timeline.some((p) => Math.abs(p.t - n.start) < 0.002))
+        if (ok) everySong++; else bad.push(l.file)
+      } catch (e) { bad.push(l.file + ':' + e.message) }
+    }
+    check('every built-in song draws and lines up', !bad.length && everySong === LIBRARY.length, everySong + (bad.length ? ' bad=' + bad.join(' ') : ''))
+    // no score, no button: a MIDI song; and the strip goes when the song does
+    const midiSong = { title: 'x', notes: [{ pitch: 60, start: 0, dur: 1, vel: 90, hand: 'right' }], duration: 1, tempo: 120 }
+    song = midiSong
+    startSong()
+    check('a song with no score has no sheet music', $('btnSheet').classList.contains('hidden') && $('sheetStrip').classList.contains('hidden'))
+    // a score with a repeat through the real parser, and a broken one that must say so
+    const xml = (bars) => '<?xml version="1.0"?><score-partwise><part-list><score-part id="P1"><part-name>P</part-name></score-part></part-list><part id="P1">' + bars + '</part></score-partwise>'
+    const bar = (n, step, extra = '') => '<measure number="' + n + '">' + (n === 1 ? '<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>' : '') + '<note><pitch><step>' + step + '</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>' + extra + '</measure>'
+    const rep = await loadSongFile({ name: 'r.xml', text: async () => xml(bar(1, 'C') + bar(2, 'D', '<barline location="right"><repeat direction="backward"/></barline>') + bar(3, 'E')) })
+    await sheet.show(rep.score)
+    check('a repeat plays through the score twice', sheet.timeline.length === 5 && sheet.timeline[2].x < sheet.timeline[1].x && rep.notes.every((n, i) => Math.abs(sheet.timeline[i].t - n.start) < 0.002), sheet.timeline.map((r) => Math.round(r.t)).join(','))
+    const saved = await saveImported({ ...rep, title: 'selftest sheet', source: 'score' })
+    const back = await getImported(saved.id)
+    check('an imported score survives saving', !!back.score && back.score.xml === rep.score.xml && back.score.order.length === 5)
+    await deleteImported(saved.id)
+    settings.sheet = wasSheet
+    saveSettings()
+    showScreen('home')
+    hideSheet()
+  }
+  console.log('SELFTEST done')
   } catch (e) { console.log('SELFTEST FAIL ' + (e && e.message)) }
 }
 /* ============================== perf probe (?perf=1) ============================== */

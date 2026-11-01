@@ -36,6 +36,13 @@ The licence of every npm package in the vendor bundles is collected in
 `renderer/vendor/LICENSES.txt` (written by `scripts/vendor-licenses.sh` on each
 `scripts/build-vendor.sh` run).
 
+## OpenSheetMusicDisplay — BSD 3-Clause
+`renderer/vendor/opensheetmusicdisplay.min.js` (2.2.1), Copyright 2019 PhonicScore, draws the
+sheet music. It bundles VexFlow 1.2.93 (MIT, Copyright 2010 Mohit Muthanna Cheppudira, with its
+music font glyphs), JSZip (used under MIT), pako (MIT and Zlib), loglevel, typescript-collections
+and small helper packages. Their licences are collected in
+`renderer/vendor/opensheetmusicdisplay.LICENSES.txt`.
+
 ## Outfit font — SIL Open Font License 1.1
 `renderer/fonts/Outfit-latin.woff2`, Copyright 2021 The Outfit Project Authors.
 Licence text in `renderer/fonts/OFL.txt`.

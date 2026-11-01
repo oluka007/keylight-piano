@@ -427,7 +427,7 @@ export async function saveImported(song) {
   const record = {
     id, file: 'imported:' + id, title: song.title, artist: song.artist || '', album: song.album || '',
     notes: song.notes, duration: song.duration, tempo: song.tempo,
-    timeSignature: song.timeSignature || null, parts: song.parts || null, bars: song.bars || null,
+    timeSignature: song.timeSignature || null, parts: song.parts || null, bars: song.bars || null, score: song.score || null,
     cover: isSafeCover(song.cover) ? song.cover : null, lyrics: song.lyrics || null, lyricsFromFile: !!song.lyricsFromFile,
     audio: song.audio || null,     // a File/Blob is stored as is (no copy into memory)
     source: song.source, added: song.added || Date.now()

@@ -645,6 +645,12 @@ body[data-screen="play"] .iconbtn:hover { background: var(--chrome-hover); borde
 @keyframes playIn { from { opacity: 0; } to { opacity: 1; } }
 .canvas-wrap { flex: 1; min-height: 0; position: relative; background: var(--stage-top); }
 #stage { width: 100%; height: 100%; display: block; }
+/* sheet music: one long line sliding under a fixed playhead, above the stage so it hides no notes */
+.sheet-strip { flex: none; height: 168px; position: relative; overflow: hidden; background: var(--chrome-raised); box-shadow: inset 0 -1px 0 var(--chrome-line); }
+.sheet-music { position: absolute; left: 0; top: 4px; bottom: 4px; width: max-content; will-change: transform; pointer-events: none; }
+/* the score's own sizes and paints, not the icon rule's */
+.sheet-music svg { width: auto; height: auto; display: block; fill: initial; stroke: initial; stroke-width: initial; stroke-linecap: initial; stroke-linejoin: initial; flex: none; }
+.sheet-head { position: absolute; top: 0; bottom: 0; left: var(--sheet-head, 28%); width: 2px; background: #33e0ff; box-shadow: 0 0 10px rgba(51, 224, 255, 0.65); pointer-events: none; }
 #stage.take-locked { object-fit: contain; }   /* a take keeps its size while the window changes */
 
 /* speed: a dark pill with a white segment under the chosen speed */
@@ -767,6 +773,9 @@ body[data-screen="play"] .toast { left: 20px; top: 84px; bottom: auto; transform
 body[data-screen="play"] .toast.show { transform: none; }
 /* below the camera picture when that is showing */
 body[data-screen="play"]:has(#camPip:not(.hidden)) .toast { top: 228px; }
+/* and below the sheet music, which pushes the stage down */
+body[data-screen="play"]:has(#sheetStrip:not(.hidden)) .toast { top: 252px; }
+body[data-screen="play"]:has(#sheetStrip:not(.hidden)):has(#camPip:not(.hidden)) .toast { top: 396px; }
 
 /* ---------- results ---------- */
 #results {

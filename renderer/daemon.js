@@ -2,7 +2,7 @@
 //
 // blocksd owns the ROLI protocol: it uploads a LittleFoot renderer to the keyboard,
 // keeps API mode alive, and exposes a local WebSocket API. We send one RGB888 frame
-// per key (24 keys) at up to 30 fps; frames are coalesced and ACK-gated.
+// per keyboard (24 keys each) at up to 30 fps; frames are coalesced and ACK-gated.
 //
 // The device UID is a 64-bit integer, which JavaScript cannot represent exactly -
 // so the UID is kept as raw decimal text and spliced into the JSON by hand.
@@ -33,20 +33,21 @@ export class LedDaemon {
     this.onConfig = onConfig || (() => {})
     this.lastConfig = {}
     this.ws = null
-    this.uidText = null
-    this.pending = null
-    this.busy = false
+    this.boards = []        // the keyboards being driven, left to right: { uidText, serial, device, pending, busy }
+    this.leftSerial = ''    // which of two keyboards is on the left, where someone has said so
     this.closed = false
     this.reconnectTimer = null
     this.discoverTimer = null
     this.frames = 0
     this.rejects = 0
     this.lastSig = ''      // the last frame asked for, so unchanged frames can be skipped
-    this.device = null     // deviceInfo() of the keyboard being driven
     this.infoTimer = null
   }
 
-  get ready() { return !!(this.ws && this.uidText) }
+  get ready() { return !!(this.ws && this.boards.length) }
+  get count() { return this.boards.length }
+  get uidText() { return this.boards.length ? this.boards[0].uidText : null }
+  get device() { return this.boards.length ? this.boards[0].device : null }   // deviceInfo() of the first keyboard
 
   connect() {
     this.closed = false
@@ -64,7 +65,7 @@ export class LedDaemon {
     }
     ws.onmessage = (ev) => this.handle(String(ev.data))
     ws.onclose = () => {
-      this.ws = null; this.uidText = null; this.busy = false; this.device = null
+      this.ws = null; this.boards = []
       clearTimeout(this.discoverTimer); this.discoverTimer = null
       clearInterval(this.infoTimer); this.infoTimer = null
       this.onStatus('disconnected')
@@ -94,21 +95,53 @@ export class LedDaemon {
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect() }, 2000)
   }
 
+  // The keyboard someone said is on the left goes first; otherwise blocksd's order stands.
+  setLeft(serial) {
+    this.leftSerial = serial || ''
+    this.sortBoards()
+    this.lastSig = ''
+  }
+  sortBoards() {
+    const left = this.boards.findIndex((b) => b.serial && b.serial === this.leftSerial)
+    if (left > 0) this.boards.unshift(this.boards.splice(left, 1)[0])
+  }
+
+  // The keyboards in a discover reply. The uids are 64-bit, so they are read as raw digits, in the
+  // same order as the devices. Any other kind of block (a Lightpad) is left out, unless there's
+  // nothing else.
+  readBoards(raw, msg) {
+    const devices = msg.devices || []
+    const all = [...raw.matchAll(/"uid"\s*:\s*(-?\d+)/g)].map((m, i) => ({ uidText: m[1], dev: devices[i] }))
+    const keys = all.filter((b) => b.dev && Number(b.dev.key_count) === KEY_COUNT)
+    const seen = new Set()
+    const list = []
+    for (const { uidText, dev } of keys.length ? keys : all.slice(0, 1)) {
+      if (seen.has(uidText)) continue
+      seen.add(uidText)
+      const known = this.boards.find((b) => b.uidText === uidText)
+      list.push({ uidText, serial: (dev && dev.serial) || '', device: deviceInfo(dev), pending: known ? known.pending : null, busy: known ? known.busy : false })
+    }
+    return list
+  }
+
   handle(raw) {
     let msg
     try { msg = JSON.parse(raw) } catch { return }
     if (msg.type === 'discover_response') {
-      const m = raw.match(/"uid"\s*:\s*(-?\d+)/)
-      if (!m) { this.uidText = null; this.device = null; this.onStatus('no-device'); this.scheduleDiscover(); return }
-      const dev = msg.devices && msg.devices[0]
-      this.device = deviceInfo(dev)
-      // the keyboard already being driven (the battery check, or a second discover that was
+      const was = this.boards
+      const list = this.readBoards(raw, msg)
+      if (!list.length) { this.boards = []; this.onStatus('no-device'); this.scheduleDiscover(); return }
+      this.boards = list
+      this.sortBoards()
+      const sameSet = was.length === list.length && list.every((b) => was.some((o) => o.uidText === b.uidText))
+      // the keyboards already being driven (the battery check, or a second discover that was
       // in flight at connect): nothing to set up again
-      if (m[1] === this.uidText) { this.onStatus('info', this.device); return }
-      this.uidText = m[1]
+      if (sameSet) { this.onStatus('info', this.device); return }
       this.lastSig = ''
-      console.log('LED daemon ready uid=' + this.uidText + ' device=' + (dev ? (dev.block_type || dev.device_type) : '?') + describe(this.device))
-      this.onStatus('connected', dev ? (dev.block_type || dev.device_type) : '', this.device)
+      const dev = msg.devices && msg.devices.find((d) => d.serial === this.boards[0].serial) || (msg.devices && msg.devices[0])
+      console.log('LED daemon ready uid=' + this.uidText + ' device=' + (dev ? (dev.block_type || dev.device_type) : '?') + describe(this.device) + (list.length > 1 ? ' keyboards=' + list.length + ' serials=' + list.map((b) => b.serial).join(',') : ''))
+      if (was.length && was[0].uidText === this.uidText) this.onStatus('boards')
+      else this.onStatus('connected', dev ? (dev.block_type || dev.device_type) : '', this.device)
       this.flush()
     } else if (msg.type === 'config_ack') {
       console.log('LED config_ack item=' + msg.item + ' ok=' + msg.ok)
@@ -120,18 +153,23 @@ export class LedDaemon {
     } else if (msg.type === 'device_added') {
       // blocksd announces a device once it can take frames; one we already know
       // may have turned frames down until now, so send the current picture again
-      if (!this.uidText) this.discover()
-      else if ((raw.match(/"uid"\s*:\s*(-?\d+)/) || [])[1] === this.uidText) {
+      const uid = (raw.match(/"uid"\s*:\s*(-?\d+)/) || [])[1]
+      const known = this.boards.find((b) => b.uidText === uid)
+      if (!known) this.discover()
+      else {
         this.lastSig = ''
-        if (msg.device) { this.device = deviceInfo(msg.device); this.onStatus('info', this.device) }
+        if (msg.device) {
+          known.device = deviceInfo(msg.device)
+          if (known === this.boards[0]) this.onStatus('info', known.device)
+        }
       }
     } else if (msg.type === 'device_removed') {
       // uid is 64-bit: compare the raw digits, not a JS number
       const m = raw.match(/"uid"\s*:\s*(-?\d+)/)
-      if (!m || m[1] !== this.uidText) return
-      this.uidText = null
-      this.device = null
-      this.busy = false
+      const at = m ? this.boards.findIndex((b) => b.uidText === m[1]) : -1
+      if (at < 0) return
+      this.boards.splice(at, 1)
+      if (this.boards.length) { this.lastSig = ''; this.onStatus('boards'); return }
       this.onStatus('no-device')
       this.scheduleDiscover()
     } else if (msg.type === 'button') {
@@ -140,7 +178,9 @@ export class LedDaemon {
     } else if (msg.type === 'subscribed') {
       console.log('LED daemon subscribed events=' + (msg.events || []).join(','))
     } else if (msg.type === 'key_frame_ack') {
-      this.busy = false
+      const uid = (raw.match(/"uid"\s*:\s*(-?\d+)/) || [])[1]
+      const board = this.boards.find((b) => b.uidText === uid) || this.boards[0]
+      if (board) board.busy = false
       if (!msg.accepted) {
         this.rejects++
         console.log('LED frame REJECTED')
@@ -155,14 +195,14 @@ export class LedDaemon {
     }
   }
 
-  // Send a device config item (e.g. MPE enable, keyboard mode, bend range).
+  // Send a device config item (e.g. MPE enable, keyboard mode, bend range) to every keyboard.
   setConfig(item, value) {
     if (!this.ready) return false
-    this.ws.send(`{"type":"config_set","uid":${this.uidText},"item":${item},"value":${value}}`)
+    for (const b of this.boards) this.ws.send(`{"type":"config_set","uid":${b.uidText},"item":${item},"value":${value}}`)
     return true
   }
 
-  // Ask the daemon for the device's current config values (diagnostics).
+  // Ask the daemon for the first keyboard's current config values (diagnostics).
   configGet() {
     if (!this.ready) return false
     this.ws.send(`{"type":"config_get","uid":${this.uidText},"id":"get"}`)
@@ -174,31 +214,39 @@ export class LedDaemon {
     if (!this.ready) return
     this.lastSig = ''      // blocksd applies brightness to the next frame, so resend it
     const v = Math.max(0, Math.min(255, Math.round(value)))
-    this.ws.send(`{"type":"brightness","uid":${this.uidText},"value":${v}}`)
+    for (const b of this.boards) this.ws.send(`{"type":"brightness","uid":${b.uidText},"value":${v}}`)
   }
 
-  // colors: array of 24 [r,g,b]
+  // colors: array of [r,g,b], 24 per keyboard from the left
   send(colors) {
-    this.pending = colors
+    this.boards.forEach((b, i) => {
+      const part = colors.slice(i * KEY_COUNT, (i + 1) * KEY_COUNT)
+      // a keyboard this frame doesn't reach goes dark once, rather than keeping its last picture
+      if (part.length || !b.dark) b.pending = part
+      b.dark = !part.length
+    })
     this.lastSig = colors.join('|')
     this.flush()
   }
 
   flush() {
-    if (!this.ready || this.busy || !this.pending) return
-    const colors = this.pending
-    this.pending = null
-    const px = new Uint8Array(KEY_COUNT * 3)
-    for (let i = 0; i < KEY_COUNT; i++) {
-      const c = colors[i] || [0, 0, 0]
-      px[i * 3] = c[0] & 255; px[i * 3 + 1] = c[1] & 255; px[i * 3 + 2] = c[2] & 255
+    if (!this.ready) return
+    for (const b of this.boards) {
+      if (b.busy || !b.pending) continue
+      const colors = b.pending
+      b.pending = null
+      const px = new Uint8Array(KEY_COUNT * 3)
+      for (let i = 0; i < KEY_COUNT; i++) {
+        const c = colors[i] || [0, 0, 0]
+        px[i * 3] = c[0] & 255; px[i * 3 + 1] = c[1] & 255; px[i * 3 + 2] = c[2] & 255
+      }
+      let bin = ''
+      for (let i = 0; i < px.length; i++) bin += String.fromCharCode(px[i])
+      const b64 = btoa(bin)
+      b.busy = true
+      this.frames++
+      this.ws.send(`{"type":"key_frame","uid":${b.uidText},"pixels":"${b64}"}`)
     }
-    let bin = ''
-    for (let i = 0; i < px.length; i++) bin += String.fromCharCode(px[i])
-    const b64 = btoa(bin)
-    this.busy = true
-    this.frames++
-    this.ws.send(`{"type":"key_frame","uid":${this.uidText},"pixels":"${b64}"}`)
   }
 
   close() {
@@ -211,8 +259,7 @@ export class LedDaemon {
     this.discoverTimer = null
     this.infoTimer = null
     if (this.ws) { try { this.ws.close() } catch {} ; this.ws = null }
-    this.uidText = null
-    this.device = null
+    this.boards = []
   }
 }
 

@@ -228,6 +228,18 @@ function scoreComposer(doc) {
   return typed ? real(clean(kid(typed, 'credit-words')?.textContent)) : ''
 }
 
+// Seconds at a played position (in quarter notes) through a tempo map of { beat, bpm }.
+export function secondsAt(map, b) {
+  let s = 0
+  for (let i = 0; i < map.length; i++) {
+    const from = map[i].beat
+    const to = i + 1 < map.length ? map[i + 1].beat : Infinity
+    if (b <= from) break
+    s += (Math.min(b, to) - from) * 60 / map[i].bpm
+  }
+  return s
+}
+
 export function parseMusicXml(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml')
   if (doc.querySelector('parsererror')) throw new Error('Invalid MusicXML')
@@ -338,16 +350,7 @@ export function parseMusicXml(text) {
     else if (m.part === last.part) map[map.length - 1] = m
   }
   if (!map.length || map[0].beat > 1e-6) map.unshift({ beat: 0, bpm: map.length ? map[0].bpm : 120 })
-  const secAt = (b) => {
-    let s = 0
-    for (let i = 0; i < map.length; i++) {
-      const from = map[i].beat
-      const to = i + 1 < map.length ? map[i + 1].beat : Infinity
-      if (b <= from) break
-      s += (Math.min(b, to) - from) * 60 / map[i].bpm
-    }
-    return s
-  }
+  const secAt = (b) => secondsAt(map, b)
 
   const all = []
   const partList = []
@@ -380,6 +383,8 @@ export function parseMusicXml(text) {
     artist: scoreComposer(doc),
     timeSignature: meter,
     parts: partList,
-    bars: starts.map(secAt)
+    bars: starts.map(secAt),
+    // for drawing the score and following it (sheet.js): the file, and how its measures are played
+    score: { xml: text, order, starts, tempo: map.map(({ beat, bpm }) => ({ beat, bpm })) }
   }
 }
