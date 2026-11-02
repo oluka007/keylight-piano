@@ -43,8 +43,10 @@ Full videos with sound: [app tour (65 s)](https://github.com/scizerss/keylight-p
 - Wait mode (the song waits for you on every note), 0.5x / 0.75x / full speed, loop
   a section, left, right or both hands, count-in, metronome, note names or finger
   numbers
-- 19 songs, 5 lessons (Watch, Practise, Play), Scales & Chords, a Playground with 19
-  scales and live chord names, 4 arcade games, stars, streaks and achievements
+- 19 songs, 5 lessons (Watch, Practise, Play), exercises in every key (major, natural and
+  harmonic minor scales, five-finger patterns, arpeggios, I–IV–V–I chords), a Playground with
+  19 scales and live chord names, 4 arcade games, 3 note-reading games, stars, streaks and
+  achievements
 - Play with feeling: 8 instruments and the sustain pedal; on sustained sounds such as
   strings, press into a key to swell it and wiggle it for vibrato
 - A hand-tracking beta: a camera over the keys shows which finger is over which key
@@ -75,7 +77,7 @@ Full videos with sound: [app tour (65 s)](https://github.com/scizerss/keylight-p
   Windows 10 or 11
 - A ROLI Piano M or LUMI Keys over USB, or in beta the [49-key ROLI Piano](#the-49-key-roli-piano-beta)
 - On a Mac, [blocksd](https://github.com/hyperb1iss/blocksd) for the key lights (step 4
-  below). Windows needs nothing else: the keys light in the keyboard's own colours
+  below). Windows needs nothing else: the keys light from plain MIDI notes
   there (see [Install on Windows](#install-on-windows))
 - To build from source: git and Node.js 22.12 or newer. Optional for the video tools
   in `scripts/`: ffmpeg, and Python 3 with numpy (and scipy for `measure-take-sync.py`)
@@ -143,10 +145,12 @@ in an [issue](https://github.com/scizerss/keylight-piano/issues).
 What is different on Windows:
 
 - blocksd, which drives the per-key colours on a Mac, runs on macOS and Linux only. On
-  Windows Keylight lights the keys with plain MIDI notes, in the keyboard's own
-  built-in colours: the note to play now, the next notes and the notes practice waits
-  for. Test lights and the setup run a light across the keys the same way.
-- Not on Windows for now: the four light styles and your own colour, the brightness
+  Windows Keylight lights the keys with plain MIDI notes: the note to play now, the next
+  notes and the notes practice waits for. Its own colours go out while Keylight runs, so
+  only those keys are lit, and come back as rainbow when it closes. Each note's velocity
+  picks its colour, so the light styles and your own colour work, within what the
+  keyboard's palette can show. Test lights and the setup run a light across the keys too.
+- Not on Windows for now: the brightness
   slider, the light show after a song, finding the keys with the camera, moving the
   keys' octave from the app (use the octave buttons on the keyboard: Keylight follows
   them), the battery level, and the keyboard's arrow and mode buttons.
@@ -354,8 +358,7 @@ report how it goes in an [issue](https://github.com/scizerss/keylight-piano/issu
   shows it as "(not connected)" while it is unplugged rather than switching to another input.
   Without ROLI's software, Windows' USB MIDI 2.0 driver calls the keyboard "USBMidi2-ACX".
 - **Key lights:** blocksd only drives the 24-key keyboards, so Keylight sends MIDI notes for
-  the lights, on Mac as well as Windows, and the keyboard lights up from them in its own colours
-  (confirmed on Windows). A port named "USBMidi2-ACX" only gets them once you choose it by name,
+  the lights, on Mac as well as Windows (confirmed on Windows). A port named "USBMidi2-ACX" only gets them once you choose it by name,
   since any other device with that name would play them as music.
 - **Octave:** Keylight can't move this keyboard's octave or ask where it is, so the screen shows
   where the keys last were, for every song, and tells you when notes sit beyond them. If you
@@ -382,7 +385,7 @@ keyboards yet, so please report how it goes in an
   to 48. Go back to one
   keyboard by running the setup again, or setting that back to Automatic.
 - **Key lights:** on a Mac with blocksd each keyboard gets its own frame, so the light styles
-  work across both. Otherwise they light from MIDI notes, in the keyboard's own colours.
+  work across both. Otherwise they light from MIDI notes.
   Nothing says which keyboard is on which side for the lights, so if they start on the right
   one, use **Swap keyboards** in Settings or the setup.
 - **Octave:** on two cables − and + move all 48 keys, and each song moves them to fit. If a
@@ -566,9 +569,16 @@ LICENSE                 MIT; THIRD_PARTY_NOTICES.md and LICENSES/ for what is bu
   import stays on your computer. With the lookup on, the song's title and artist are sent to the
   iTunes Search API for cover art and to LRCLIB for lyrics; those belong to their owners.
 
+## Thanks
+
+[KeyFall](https://github.com/skmonio/Keyfall) by skmonio, another LUMI alternative, showed that
+only the keys to play should be lit, and inspired the note games and the wider set of exercises.
+The commands that turn the keyboard's own colours
+off are documented by [LUMI-lights](https://github.com/benob/LUMI-lights).
+
 ## Roadmap
 
-- **Windows (beta)**: works today with basic key lights in the keyboard's own colours.
+- **Windows (beta)**: works today with key lights from MIDI notes.
   The four light styles, brightness, the arrow and mode buttons and the battery level
   need blocksd, which does not run on Windows yet. Feedback from Windows owners is
   very welcome.

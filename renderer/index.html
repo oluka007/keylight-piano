@@ -203,8 +203,13 @@
     <section id="screen-toolbox" class="screen hidden">
       <div class="tb-hero">
         <div class="seg" id="tbType">
-          <button data-t="scale" class="on">Scales</button>
-          <button data-t="chord">Chords</button>
+          <button data-t="scale" class="on">Major</button>
+          <button data-t="minor">Minor</button>
+          <button data-t="harmonic">Harmonic</button>
+          <button data-t="five">Five-finger</button>
+          <button data-t="chord">Arpeggio</button>
+          <button data-t="minorarp">Minor arpeggio</button>
+          <button data-t="cadence">Chords</button>
         </div>
         <div class="seg" id="tbHand">
           <button data-h="both" class="on">Both hands</button>
@@ -228,6 +233,16 @@
     <!-- ================= GAMES ================= -->
     <section id="screen-games" class="screen hidden">
       <div class="games-grid" id="gameList"></div>
+    </section>
+
+    <!-- ================= NOTE GAMES ================= -->
+    <section id="screen-quiz" class="screen hidden">
+      <div class="quiz">
+        <div class="quiz-top"><span id="quizTime"></span><span id="quizScore"></span></div>
+        <div class="quiz-prompt" id="quizPrompt"></div>
+        <div class="quiz-help" id="quizHelp"></div>
+        <button id="quizAgain" class="primary hidden">Play again</button>
+      </div>
     </section>
 
     <!-- ================= SETTINGS ================= -->

@@ -25,8 +25,10 @@ import {
 } from './importer.js'
 import {
   noteOn as syNoteOn, noteOff as syNoteOff, clearLights,
-  beginApiMode, setLightingMode, turnOffAllKeys, LIGHTING_MODE
+  beginApiMode, setLightingMode, turnOffAllKeys, LIGHTING_MODE,
+  blankOwnColours, restoreOwnColours, velocityForColour
 } from './lights.js'
+import { NOTE_GAMES, ROUND_SECONDS, HINT_AFTER_SECONDS, nextQuestion, isRight, starsFor, staffSvg, pitchClass } from './notegames.js'
 import {
   startTake, stopTake, isRecording, takeBusy, logMidi, onTakeChange, takeElapsed, takeFrameDrawn,
   pickMimeType, MIME_TYPES, TAKE_NAME, mp4Timeline, audioEdit, AAC_PRIMING
@@ -121,6 +123,17 @@ let lastMode = 'PLAY'
 const TONICS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11, 12]
 const CHORD_STEPS = [0, 4, 7, 12]
+// What the Scales & chords screen can practise. steps: semitones above the key, played up and back.
+const TB_TYPES = {
+  scale: { name: 'major scale', short: 'scale', steps: SCALE_STEPS },
+  minor: { name: 'natural minor scale', short: 'minor scale', steps: [0, 2, 3, 5, 7, 8, 10, 12] },
+  harmonic: { name: 'harmonic minor scale', short: 'harmonic minor', steps: [0, 2, 3, 5, 7, 8, 11, 12] },
+  five: { name: 'five-finger pattern', short: 'five-finger', steps: [0, 2, 4, 5, 7] },
+  chord: { name: 'major arpeggio', short: 'arpeggio', steps: CHORD_STEPS },
+  minorarp: { name: 'minor arpeggio', short: 'minor arpeggio', steps: [0, 3, 7, 12] },
+  cadence: { name: 'I–IV–V–I chords', short: 'chords', chords: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [0, 4, 7]] }
+}
+const tbInfo = () => TB_TYPES[tb.type] || TB_TYPES.scale
 const tb = { type: 'scale', tonic: 0, hand: 'both' }
 
 // Guided lessons: three steps per lesson, unlocking
@@ -157,7 +170,7 @@ function boot() {
   applyKeyCount()
   fillKbPorts()
   const ob = $('onboarding')
-  const skipOb = q.has('demo') || q.has('screen') || q.has('tb') || q.has('importdemo') || q.has('freeplay') || q.has('selftest') || q.has('perf')
+  const skipOb = q.has('demo') || q.has('quiz') || q.has('screen') || q.has('tb') || q.has('importdemo') || q.has('freeplay') || q.has('selftest') || q.has('perf')
   // setup=1..4 opens the setup at that step even once it is done (screenshots, support)
   if (q.has('setup')) openSetup(Number(q.get('setup')) || 1)
   else if (ob && !store.get('lumi.onboarded', false) && !skipOb) openSetup(1)
@@ -214,6 +227,8 @@ function boot() {
   if (q.get('style')) setLightStyle(q.get('style'), false)
   if (q.get('chip')) searchChip = q.get('chip')
   if (q.get('screen')) showScreen(q.get('screen'))
+  { const g = NOTE_GAMES.find((x) => x.id === q.get('quiz')); if (g) startQuiz(g) }   // quiz=<id>: a note game, for screenshots
+  if (q.has('quizdemo')) setInterval(() => { if (quiz && !quiz.over) quizPress(quiz.q.pitch) }, 1000)   // quizdemo=1: it answers itself, for clips
   if (q.get('tb')) {
     tb.type = q.get('tb')
     tb.tonic = Number(q.get('tonic') || 0)
@@ -638,7 +653,7 @@ function renderSetup() {
     v = {
       title: canLight ? 'Watch your keys' : 'Light up your keys',
       copy: canLight ? 'A light runs along your keys from left to right.'
-        : noteLightsOnly() ? 'Your keys light up to show you what to play next, in your keyboard’s own colours.'
+        : noteLightsOnly() ? 'Your keys light up to show you what to play next, and stay dark otherwise.'
         : 'Your keys light up to show you what to play next. A free helper, blocksd, drives the lights.',
       check: canLight
         ? (setup.lights === 'yes' ? ['ok', 'Your keys light up']
@@ -1071,6 +1086,7 @@ function wireUI() {
 // Search has no title: its "Search here" pill sits in the middle of the top bar instead
 const SCREEN_TITLES = {
   home: ['', ''], search: ['', ''], achievements: ['Achievements', 'Your progress on ' + THIS_COMPUTER],
+  quiz: ['', ''],
   toolbox: ['Scales & chords', 'Pick a key, then practise it'], games: ['Games', 'Hit the notes in time, beat the pass mark'],
   settings: ['Settings', 'Lights, sound and practice']
 }
@@ -1082,6 +1098,7 @@ function showScreen(name) {
     const r = recent()[0]
     if (r) { openLibrary(r.file); return }
   }
+  if (name !== 'quiz') quiz = null
   if (screen === 'play' && name !== 'play') {
     endTake('left the player')
     clearNoteLights()
@@ -1354,7 +1371,10 @@ const GAME_ART = {
   springboard: 'linear-gradient(200deg,#ffc2d9 0%,#f06aa5 50%,#9b1f63 100%)',
   cascade: 'radial-gradient(ellipse at 50% 120%,#2ec4b6 0%,#0d3b66 60%,#081f33 100%)',
   rainbow: 'linear-gradient(120deg,#ff6b6b,#ffce48,#3dbe74,#3d8bff,#8a5cf0)',
-  superluminal: 'radial-gradient(ellipse at 50% 110%,#3b2fb8 0%,#120f3a 70%)'
+  superluminal: 'radial-gradient(ellipse at 50% 110%,#3b2fb8 0%,#120f3a 70%)',
+  'find-the-key': 'linear-gradient(160deg,#ffd27a 0%,#f08a3c 55%,#8f3a12 100%)',
+  'read-treble': 'linear-gradient(200deg,#b6f2c4 0%,#3dbe74 50%,#0f5a3a 100%)',
+  'read-bass': 'linear-gradient(200deg,#9fd0ff 0%,#3d8bff 50%,#123a8f 100%)'
 }
 function gameCard(g) {
   const stars = gameBest(g.id)
@@ -1366,13 +1386,79 @@ function gameCard(g) {
   card.onclick = () => startGame(g)
   return card
 }
+function noteGameCard(g) {
+  const stars = gameBest(g.id)
+  const card = document.createElement('button')
+  card.className = 'game-card'
+  card.innerHTML = `<div class="g-art" style="background:${GAME_ART[g.id]}"><div class="g-name">${g.name}</div></div>
+    <div class="g-meta"><span>${g.sub}</span>
+    <span class="g-stars">${Array.from({ length: 5 }, (_, i) => `<svg class="${i < stars ? 'on' : ''}"><use href="#i-star"/></svg>`).join('')}</span></div>`
+  card.onclick = () => startQuiz(g)
+  return card
+}
 function renderGames() {
   for (const id of ['gameList', 'searchGames']) {
     const wrap = $(id)
     if (!wrap) continue
     wrap.replaceChildren()
-    for (const g of GAMES) if (!searchTerm || g.name.toLowerCase().includes(searchTerm)) wrap.appendChild(gameCard(g))
+    const found = (g) => !searchTerm || g.name.toLowerCase().includes(searchTerm)
+    for (const g of GAMES) if (found(g)) wrap.appendChild(gameCard(g))
+    for (const g of NOTE_GAMES) if (found(g)) wrap.appendChild(noteGameCard(g))
   }
+}
+
+/* ============================== note games ============================== */
+let quiz = null    // { game, score, until, q, askedAt, over, best }
+function showQuizQuestion() {
+  const el = $('quizPrompt')
+  el.classList.remove('wrong')
+  if (quiz.game.kind === 'name') el.textContent = quiz.q.name
+  else el.innerHTML = staffSvg(quiz.q.pitch, quiz.game.clef)
+  $('quizHelp').textContent = 'Any octave counts'
+}
+function askQuiz(now = performance.now()) {
+  quiz.q = nextQuestion(quiz.game, quiz.q)
+  quiz.askedAt = now
+  showQuizQuestion()
+}
+function startQuiz(g) {
+  initAudio()
+  quiz = { game: g, score: 0, until: performance.now() + ROUND_SECONDS * 1000, q: null, askedAt: 0, over: false }
+  $('quizAgain').classList.add('hidden')
+  $('quizAgain').onclick = () => startQuiz(g)
+  showScreen('quiz')
+  $('title').textContent = g.name
+  $('subtitle').textContent = 'Games · one minute'
+  askQuiz()
+  updateQuiz()
+}
+function quizPress(pitch, now = performance.now()) {
+  if (!quiz || quiz.over || screen !== 'quiz') return
+  if (isRight(quiz.q, pitch)) { quiz.score++; askQuiz(now) }
+  else { $('quizPrompt').classList.add('wrong'); $('quizHelp').textContent = 'Not that one: try again' }
+}
+function finishQuiz() {
+  quiz.over = true
+  const stars = starsFor(quiz.score)
+  if (stars > gameBest(quiz.game.id)) store.set('lumi.game.' + quiz.game.id, stars)
+  $('quizPrompt').classList.remove('wrong')
+  $('quizPrompt').textContent = '★'.repeat(stars) + '☆'.repeat(5 - stars)
+  $('quizHelp').textContent = quiz.score + (quiz.score === 1 ? ' note' : ' notes') + ' in a minute'
+  $('quizAgain').classList.remove('hidden')
+}
+function updateQuiz(now = performance.now()) {
+  if (!quiz || quiz.over) return
+  const left = Math.max(0, Math.ceil((quiz.until - now) / 1000))
+  setText($('quizTime'), Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'))
+  setText($('quizScore'), String(quiz.score) + ' right')
+  if (left <= 0) finishQuiz()
+}
+// Stuck on a question: its keys light up after a few seconds.
+function quizHintPitches(now = performance.now()) {
+  if (!quiz || quiz.over || screen !== 'quiz' || now - quiz.askedAt < HINT_AFTER_SECONDS * 1000) return []
+  const base = kbBase(), out = []
+  for (let i = 0; i < kbKeys(); i++) if (pitchClass(base + i) === pitchClass(quiz.q.pitch)) out.push(base + i)
+  return out
 }
 
 async function startGame(g) {
@@ -1545,20 +1631,39 @@ function renderToolbox() {
     b.onclick = () => { tb.hand = b.dataset.h; renderToolbox() }
   }
   $('tbStart').onclick = startExercise
-  const scaleName = tb.type === 'scale' ? 'major scale' : 'major chord'
-  $('tbInfo').textContent = `${TONICS[tb.tonic]} ${scaleName} · ${tb.hand === 'both' ? 'both hands' : tb.hand + ' hand'}`
+  $('tbInfo').textContent = `${TONICS[tb.tonic]} ${tbInfo().name} · ${tb.hand === 'both' ? 'both hands' : tb.hand + ' hand'}`
   const stars = exerciseStars()
   $('tbStars').textContent = '★'.repeat(stars) + '☆'.repeat(Math.max(0, 5 - stars))
   // the notes you'll play, in order
   const notesEl = $('tbNotes')
   if (notesEl) {
-    const steps = tb.type === 'scale' ? SCALE_STEPS : CHORD_STEPS
+    const steps = tbInfo().steps || tbInfo().chords.map((c) => c[0])
     notesEl.innerHTML = steps.map((st, i) => `<span class="tb-note" style="animation-delay:${i * 0.04}s;background:${COLORS.playground[(tb.tonic + st) % 12]}">${TONICS[(tb.tonic + st) % 12]}</span>`).join('')
   }
 }
 
+// Each chord in turn, two beats long: the root in the left hand, the chord in the right, each
+// in its own octave so that all of it fits on 24 keys in every key.
+function makeCadenceSong() {
+  const beat = 0.75
+  const notes = []
+  tbInfo().chords.forEach((chord, i) => {
+    const start = i * 2 * beat, dur = 2 * beat * 0.9
+    const add = (hand, pitch) => notes.push({ pitch, start, dur, vel: 100, hand })
+    if (tb.hand !== 'right') add('left', 48 + (tb.tonic + chord[0]) % 12)
+    if (tb.hand !== 'left') for (const step of chord) add('right', 60 + (tb.tonic + step) % 12)
+  })
+  notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+  assignFingering(notes, { tempo: 60 / beat })
+  return {
+    title: `${TONICS[tb.tonic]} ${tbInfo().short} · ${tb.hand === 'both' ? 'both hands' : tb.hand + ' hand'}`,
+    notes, windows: null, duration: 8 * beat, tempo: 60 / beat, artist: 'Exercise'
+  }
+}
+
 function makeExerciseSong() {
-  const steps = tb.type === 'scale' ? SCALE_STEPS : CHORD_STEPS
+  if (tbInfo().chords) return makeCadenceSong()
+  const steps = tbInfo().steps
   const seq = [...steps, ...[...steps].slice(0, -1).reverse()]
   const interval = 0.5                // one note a beat at 120 BPM
   // the left hand plays an octave below the right
@@ -1585,7 +1690,7 @@ function makeExerciseSong() {
   }
   assignFingering(notes, { tempo: 120 })   // the notes are 0.5 s apart
   return {
-    title: `${TONICS[tb.tonic]} ${tb.type === 'scale' ? 'scale' : 'chord'} · ${hands}`,
+    title: `${TONICS[tb.tonic]} ${tbInfo().short} · ${hands}`,
     notes,
     windows,
     duration: notes[notes.length - 1].start + interval,
@@ -2333,6 +2438,8 @@ function noteRoute(pitch) {
   const port = out ? midiOutput2 : midiOutput
   return port ? [port, pair.low[played] + i - 24 * side] : null
 }
+const NOTE_DIM = 128            // in updateNoteLights' map: this key is the dim kind (poly aftertouch sets its level)
+const NOTE_DIM_LEVEL = 30
 function updateNoteLights(desired) {
   if (!midiOutput && !midiOutput2) return
   for (const [pitch, vel] of desired) {
@@ -2340,17 +2447,62 @@ function updateNoteLights(desired) {
     if (prev === vel) continue
     const was = litRoutes.get(pitch), route = was || noteRoute(pitch)
     if (!route) continue
-    try { route[0].send([0x90, route[1], vel & 0x7f]) } catch (_e) {}
+    try {
+      if (vel >= NOTE_DIM || prev >= NOTE_DIM) route[0].send([0xa0, route[1], vel >= NOTE_DIM ? NOTE_DIM_LEVEL : 127])
+      route[0].send([0x90, route[1], vel & 0x7f])
+    } catch (_e) {}
     litNotes.set(pitch, vel)
     litRoutes.set(pitch, route)
   }
   for (const pitch of [...litNotes.keys()]) {
     if (desired.has(pitch)) continue
     const route = litRoutes.get(pitch)
-    if (route) { try { route[0].send([0x80, route[1], 0]) } catch (_e) {} }
+    if (route) {
+      try {
+        route[0].send([0x80, route[1], 0])
+        if (litNotes.get(pitch) >= NOTE_DIM) route[0].send([0xa0, route[1], 127])
+      } catch (_e) {}
+    }
     litNotes.delete(pitch)
     litRoutes.delete(pitch)
   }
+}
+// With no light service, the keyboard's own colours go out while Keylight runs, so that the only
+// keys lit are the ones it asks for, and come back when it stops. Sent again now and then: the
+// keyboard may have been switched off and on since. On a Mac the first seconds wait for the light
+// service to answer.
+const blankedPorts = new Map()   // port -> when it was last told
+const OWN_COLOURS_RESEND_MS = 10000
+function syncOwnColours(now = performance.now()) {
+  const settling = !IS_WIN && now < 4000
+  const want = framesDrive() || settling ? [] : [midiOutput, midiOutput2].filter(Boolean)
+  for (const port of [...blankedPorts.keys()]) {
+    if (want.includes(port)) continue
+    blankedPorts.delete(port)
+    try { if (port.state !== 'disconnected') restoreOwnColours(port) } catch (_e) {}
+  }
+  for (const port of want) {
+    if (now - (blankedPorts.get(port) ?? -Infinity) < OWN_COLOURS_RESEND_MS) continue
+    const first = !blankedPorts.has(port)
+    blankedPorts.set(port, now)
+    try { blankOwnColours(port) } catch (_e) {}
+    if (first) console.log('LIGHTS own colours off on ' + port.name)
+  }
+}
+window.addEventListener('pagehide', () => {
+  clearNoteLights()
+  for (const port of blankedPorts.keys()) { try { restoreOwnColours(port) } catch (_e) {} }
+  blankedPorts.clear()
+})
+const noteLightColour = (rgb) => velocityForColour(rgb)
+// Blue rather than a dimmer white: Piano's next key has to read as different even on a keyboard
+// that doesn't dim single keys.
+const nextNoteColour = (n, style) => (style === 'Piano' ? [64, 139, 248] : noteRgb(n, style))
+// Keys you are holding, on keys the song isn't lighting: the keyboard's own press light went out
+// with its colours.
+function addHeldNoteLights(desired) {
+  const base = kbBase()
+  for (const pitch of held) if (!desired.has(pitch)) desired.set(pitch, noteLightColour(pressRgb(pitch, pitch - base)))
 }
 function clearNoteLights() {
   for (const route of litRoutes.values()) { try { route[0].send([0x80, route[1], 0]) } catch (_e) {} }
@@ -3077,6 +3229,7 @@ function handleNoteOn(pitch, vel, channel = 0) {
   held.add(pitch)
   learnLengthFromNotes(pitch)
   calibrateFromNote(pitch)
+  quizPress(pitch)
   if (!player || player.mode === 'WATCH') return
   const need = player.waiting ? new Set(player.needPitches) : null
   const res = player.noteOn(pitch)
@@ -3323,7 +3476,7 @@ function updateKbChip() {
 function showWindowsLights() {
   const ready = framesDrive()
   const el = $('daemonState')
-  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'The keyboard’s own colours' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? (kbAsk ? 'Choose your keyboard below' : 'No keyboard found') : 'checking…'
+  if (el) el.textContent = ready ? 'Full colour (blocksd)' : midiOutput ? 'On: only the keys to play' : midiInput ? (canChooseLights() ? 'Off: choose your keyboard below' : 'Off for this keyboard') : midi ? (kbAsk ? 'Choose your keyboard below' : 'No keyboard found') : 'checking…'
   const b = $('brightness')
   if (b) {
     b.disabled = !ready
@@ -3869,6 +4022,7 @@ function drawSetupGuide(frame, base) {
 function restFrame() {
   const base = kbBase()
   const frame = Array.from({ length: lightKeys() }, (_, i) => restRgb(base + i, i))
+  for (const pitch of quizHintPitches()) if (pitch >= base && pitch < base + frame.length) frame[pitch - base] = userRgb()
   drawPlayedKeys(frame, base)
   drawStylePreview(frame, base)
   drawOctaveSweep(frame, base)
@@ -3965,10 +4119,24 @@ function sendKeys(frame) {
   daemon.send(frame)
 }
 
+// Away from a song the only keys lit by note are the ones you hold and a note game's hint.
+function idleNoteLights() {
+  if (framesDrive()) return
+  const desired = new Map()
+  if (midiOutput) {
+    for (const pitch of quizHintPitches()) desired.set(pitch, noteLightColour(userRgb()))
+    addHeldNoteLights(desired)
+  }
+  updateNoteLights(desired)
+}
+
 function frame(ts) {
   requestAnimationFrame(frame)
   if (tracker) tracker.active = screen === 'settings' || screen === 'play'
+  syncOwnColours()
   if (screen === 'settings') drawCamera($('camSetupCanvas'))
+  if (screen === 'quiz') updateQuiz()
+  if (screen !== 'play' || freeplay) idleNoteLights()
   if (screen !== 'play') {
     if (performance.now() > ledOverrideUntil) sendKeys(restFrame())
     return
@@ -4056,11 +4224,11 @@ function frame(ts) {
   if (!framesDrive()) {
     const desired = new Map()
     if (midiOutput) {
-      const activeP = new Set(snap.activeNotes.map((n) => n.pitch))
-      const upP = new Set(snap.upcomingNotes.map((n) => n.pitch))
-      for (const pitch of activeP) desired.set(pitch, 127)
-      for (const pitch of upP) if (!desired.has(pitch)) desired.set(pitch, 20)
-      if (snap.waiting) for (const pitch of snap.needPitches) desired.set(pitch, 110)
+      const style = lightStyle()
+      for (const n of snap.activeNotes) desired.set(n.pitch, noteLightColour(noteRgb(n, style)))
+      for (const n of snap.upcomingNotes) if (!desired.has(n.pitch)) desired.set(n.pitch, noteLightColour(nextNoteColour(n, style)) | NOTE_DIM)
+      if (snap.waiting) for (const n of snap.waitNotes || []) if (snap.needPitches.has(n.pitch)) desired.set(n.pitch, noteLightColour(noteRgb(n, style)))
+      addHeldNoteLights(desired)
     }
     updateNoteLights(desired)
   }
@@ -4846,6 +5014,76 @@ async function runSelfTest() {
       check('choice unplugged waits', got === '-/-', got)
       got = names(pickPorts([port('ROLI Piano', 'disconnected'), port('Casio')], [], 'ROLI Piano'))
       check('choice disconnected waits', got === '-/-', got)
+      {
+        const sent = [], fake = { name: 'fake', send: (m) => sent.push([...m]) }
+        blankOwnColours(fake)
+        const hex = sent.map((m) => m.map((b) => b.toString(16).padStart(2, '0')).join(' '))
+        check('own colours off, on both addresses', sent.length === 6 && hex.includes('f0 00 21 10 77 00 10 40 22 00 00 00 00 00 ' + hex[0].slice(-5)) && hex[1].includes('77 37 10 40 22') && hex.some((h) => h.includes('77 00 10 20 04 00 00 00 7e 03')) && hex.some((h) => h.includes('77 37 10 30 04 00 00 00 7e 03')), hex[0])
+        sent.length = 0
+        restoreOwnColours(fake)
+        check('own colours back', sent.length === 2 && sent[0].slice(6, 9).join() === [0x10, 0x40, 0x02].join())
+        const near = (rgb, lo, hi) => { const v = velocityForColour(rgb); return v >= lo && v <= hi }
+        check('colours to velocities', velocityForColour([255, 255, 255]) === 127 && near([255, 0, 0], 1, 12) && near([0, 255, 0], 55, 72) && near([0, 100, 255], 90, 108) && near([120, 60, 240], 110, 126), [velocityForColour([255, 0, 0]), velocityForColour([0, 255, 0]), velocityForColour([0, 100, 255])].join())
+        check('styles light in different colours', new Set(['Piano', 'Pro', 'Stage'].map((st) => velocityForColour(noteRgb({ pitch: 62, hand: 'right' }, st)))).size === 3)
+        const tb0 = { ...tb }
+        let fits = true, counts = []
+        for (const type of Object.keys(TB_TYPES)) for (let tonic = 0; tonic < 12; tonic++) {
+          Object.assign(tb, { type, tonic, hand: 'both' })
+          const ps = makeExerciseSong().notes.map((n) => n.pitch)
+          if (type === 'cadence' && (Math.min(...ps) < 48 || Math.max(...ps) > 71)) fits = false
+          if (tonic === 0) counts.push(type + '=' + ps.length)
+        }
+        Object.assign(tb, tb0)
+        check('every exercise builds, chords fit 24 keys', fits && counts.length === 7, counts.join(' '))
+        const g = NOTE_GAMES[1]
+        let q = null, okq = true
+        for (let i = 0; i < 200; i++) { const nq = nextQuestion(g, q); if (q && pitchClass(nq.pitch) === pitchClass(q.pitch)) okq = false; if (nq.pitch < 60 || nq.pitch > 81) okq = false; q = nq }
+        check('note questions stay in range and change', okq)
+        check('any octave is right', isRight({ pitch: 60 }, 84) && !isRight({ pitch: 60 }, 61) && isRight({ pitch: 66 }, 42))
+        check('stars', starsFor(0) === 0 && starsFor(10) === 1 && starsFor(42) === 5)
+        check('staff draws', staffSvg(60, 'treble').includes('ellipse') && staffSvg(43, 'bass').includes('ellipse'))
+        const was = screen
+        startQuiz(NOTE_GAMES[0])
+        const first = quiz.q, t0 = performance.now()
+        const wrong = (first.pitch + 1)
+        quizPress(wrong)
+        const afterWrong = quiz.score === 0 && quiz.q === first
+        quizPress(first.pitch + 12)
+        const afterRight = quiz.score === 1 && quiz.q !== first
+        const noHint = quizHintPitches(t0 + 1000).length === 0
+        quiz.askedAt = t0
+        const hints = quizHintPitches(t0 + 6000)
+        const hintOk = hints.length > 0 && hints.every((p) => pitchClass(p) === pitchClass(quiz.q.pitch))
+        updateQuiz(quiz.until + 1)
+        check('a note game round', afterWrong && afterRight && noHint && hintOk && quiz.over && !$('quizAgain').classList.contains('hidden'))
+        localStorage.removeItem('lumi.game.' + NOTE_GAMES[0].id)
+        showScreen(was)
+      }
+      {
+        // the tester's report: with no light service only the next keys light, and the style shows
+        const sent = [], fake = { name: 'LUMI Keys BLOCK', state: 'connected', send: (m) => sent.push([...m]) }
+        const out0 = midiOutput, style0 = lightStyle()
+        await openLibrary('twinkle.xml')
+        midiOutput = fake
+        blankedPorts.delete(fake)
+        await new Promise((r) => setTimeout(r, 250))
+        const blanked = sent.some((m) => m[0] === 0xf0 && m[6] === 0x10 && m[7] === 0x40 && m[8] === 0x22)
+        const next = new Set([...player.activeNotes(), ...player.upcomingNotes()].map((n) => n.pitch))
+        const lit = [...litNotes.keys()]
+        check('only the next keys are lit', blanked && !framesDrive() && lit.length > 0 && lit.length <= 4 && lit.every((p) => next.has(p)), lit.join())
+        const velAt = async (st) => { setLightStyle(st, false); await new Promise((r) => setTimeout(r, 120)); return litNotes.get(lit[0]) }
+        const vels = [await velAt('Piano'), await velAt('Stage'), await velAt('User')]
+        check('the light style changes the keys', new Set(vels).size >= 2, vels.join())
+        showScreen('home')
+        await new Promise((r) => setTimeout(r, 120))
+        check('nothing lit away from a song', litNotes.size === 0, litNotes.size)
+        sent.length = 0
+        midiOutput = out0
+        syncOwnColours()
+        check('own colours come back when the port goes', sent.some((m) => m[0] === 0xf0 && m[8] === 0x02) && !blankedPorts.has(fake))
+        setLightStyle(style0, false)
+        song = null; player = null
+      }
       check('names', [['ROLI Piano', 49], ['ROLI ROLI Piano', 49], ['ROLI Piano M', 24], ['LUMI Keys BLOCK', 24], ['Piano M', 24], ['USBMidi2-ACX', 24]].every(([n, k]) => keysFromName(n) === k))
 
       const end = (low, p, base) => JSON.stringify(readEndKeys(low, p, base))

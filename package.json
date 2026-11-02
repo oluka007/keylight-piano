@@ -1,7 +1,7 @@
 {
   "name": "keylight-piano",
   "productName": "Keylight",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Unofficial, open-source piano-learning app for the ROLI Piano M and LUMI Keys: falling notes, key lights, lessons and games, on your Mac or Windows PC",
   "license": "MIT",

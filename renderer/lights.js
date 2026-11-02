@@ -63,9 +63,63 @@ export function setGlobalKeyColor(port, r, g, b) {
   send(port, [0x10, 0x20, v1, v2, v3, v4, v5, 0x03])
 }
 
+// Root key colour, the same packing on the next slot.
+export function setRootKeyColor(port, r, g, b) {
+  const v1 = (((b & 0x03) << 5) | 0x04) & 0x7f
+  const v2 = (((b >> 2) & 0x3f) | (g & 0x01)) & 0x7f
+  const v3 = (g >> 1) & 0x7f
+  const v4 = r & 0x7f
+  const v5 = ((r >> 7) | 0x7e) & 0x7f
+  send(port, [0x10, 0x30, v1, v2, v3, v4, v5, 0x03])
+}
+
 export const COLOR_MODE = { rainbow: 0x02, scale: 0x22, piano: 0x42, night: 0x62 }
 export function setColorModeNamed(port, name) {
   send(port, [0x10, 0x40, COLOR_MODE[name] ?? COLOR_MODE.piano, 0, 0, 0, 0, 0])
+}
+
+// Without a light service the keyboard's own program keeps every in-scale key lit, so a key
+// asked for by note can't be told from the rest. These commands turn its own colours off and
+// back on (rainbow, the factory mode: it can't be asked which mode it was in). Keyboards are
+// reported to answer on either address, and ignore the one that isn't theirs.
+function sendBoth(port, make) {
+  if (!port) return
+  for (const dev of [0x00, 0x37]) {
+    const body = make()
+    port.send([0xf0, ...ROLI_MFR, 0x77, dev, ...body, checksum(body), 0xf7])
+  }
+}
+export function blankOwnColours(port) {
+  sendBoth(port, () => [0x10, 0x40, COLOR_MODE.scale, 0, 0, 0, 0, 0])
+  sendBoth(port, () => [0x10, 0x20, 0x04, 0, 0, 0, 0x7e, 0x03])
+  sendBoth(port, () => [0x10, 0x30, 0x04, 0, 0, 0, 0x7e, 0x03])
+}
+export function restoreOwnColours(port) {
+  sendBoth(port, () => [0x10, 0x40, COLOR_MODE.rainbow, 0, 0, 0, 0, 0])
+}
+
+// A key lit by note takes its colour from the velocity: a fixed sweep through the hues in the
+// keyboard's program, approximated here by these points. 127 is white.
+const NOTE_COLOURS = [
+  [1, 0xff506f], [10, 0xff7553], [19, 0xff9a37], [28, 0xffbd2b], [37, 0xffdf28], [46, 0xe8f733], [55, 0xa4fb5c],
+  [64, 0x5ffe86], [73, 0x44ecb0], [82, 0x29dbd9], [91, 0x32b7ee], [100, 0x4c8bf8], [109, 0x6767fc], [118, 0x8453f2], [126, 0x9d42ea]
+]
+const rgbOf = (c) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff]
+export function velocityForColour(rgb) {
+  // a colour without much hue can only be shown as white
+  if (Math.max(...rgb) - Math.min(...rgb) < 40 && Math.min(...rgb) > 120) return 127
+  const max = Math.max(1, ...rgb), want = rgb.map((v) => v * 255 / max)   // brightness isn't in the table
+  let best = 1, bestD = Infinity
+  for (let i = 0; i < NOTE_COLOURS.length - 1; i++) {
+    const [va, ca] = NOTE_COLOURS[i], [vb, cb] = NOTE_COLOURS[i + 1]
+    const a = rgbOf(ca), b = rgbOf(cb)
+    for (let v = va; v < vb || (v === vb && i === NOTE_COLOURS.length - 2); v++) {
+      const k = (v - va) / (vb - va)
+      const d = [0, 1, 2].reduce((sum, c) => sum + (a[c] + (b[c] - a[c]) * k - want[c]) ** 2, 0)
+      if (d < bestD) { bestD = d; best = v }
+    }
+  }
+  return best
 }
 
 /* ---------- program-event lighting ----------
