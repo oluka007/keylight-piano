@@ -1,0 +1,164 @@
+/* The Jam screen. Uses the tokens of glass.css (--text, --muted, --mint, --pane-line, --glass-fill ...);
+   nothing is redefined here. Works from 360px wide: controls wrap, the step grid and the keyboard
+   scroll sideways inside their own box, never the page. */
+
+.jam { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 1100px; min-width: 0; margin: 0 auto; padding: 4px 16px 24px; color: var(--text); container-type: inline-size; container-name: jam; }
+.jam, .jam *, .jam *::before, .jam *::after { box-sizing: border-box; }
+
+/* every control keeps a 44 px touch target; a range's own box stays tall while its track stays thin */
+.jam button, .jam select, .jam input[type="number"], .jam input[type="text"] { min-height: 44px; }
+.jam input[type="range"] { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; height: 44px; margin: 0; }
+.jam input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 6px; }
+.jam input[type="range"]::-webkit-slider-thumb { margin-top: -6px; }
+.jam input[type="range"]::-moz-range-track { height: 6px; border-radius: 6px; }
+.jam input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 50%; }
+
+.jam-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+.jam-title { font-family: var(--serif); font-weight: 500; font-size: 28px; letter-spacing: -.01em; margin: 0; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.jam-head-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+.jam-h2 { font-family: var(--serif); font-weight: 500; font-size: 20px; margin: 0 0 8px; }
+.jam-status { margin: 0; min-height: 20px; color: var(--muted); font-size: 14px; }
+.jam-problem { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid rgba(255, 122, 134, 0.5); background: rgba(255, 122, 134, 0.08); }
+.jam-help { margin: 8px 0 0; color: var(--faint); font-size: 13px; line-height: 1.45; }
+
+.jam .jam-btn, .jam .jam-mini, .jam .jam-step, .jam .jam-trackname, .jam .jam-play {
+  height: 44px; min-width: 44px; padding: 0 16px; font-size: 14px;
+}
+.jam .jam-mini { padding: 0 8px; font-size: 13px; flex: 1 1 0; }
+.jam .jam-step { padding: 0; font-size: 20px; min-width: 44px; }
+.jam .jam-play { min-width: 110px; font-size: 16px; }
+.jam button:disabled { opacity: .4; cursor: default; }
+.jam .jam-toggle.on, .jam .jam-mini.live { background: var(--accent-soft); border-color: var(--accent-line); color: var(--mint); }
+.jam .jam-mini.live { background: rgba(255, 122, 134, 0.16); border-color: rgba(255, 122, 134, 0.7); color: #ffc2c7; }
+.jam .jam-play.playing { background: var(--surface-3); color: var(--text); box-shadow: none; }
+
+.jam button:focus-visible, .jam select:focus-visible, .jam input:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; box-shadow: var(--focus-ring); }
+
+.jam-card {
+  background: var(--glass-fill); border: 1px solid var(--pane-line); box-shadow: var(--glass-edge), var(--glass-shadow);
+  border-radius: var(--radius); padding: 14px; min-width: 0; max-width: 100%;
+}
+.jam-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--accent-line); background: var(--pane); }
+.jam-confirm p { margin: 0; flex: 1 1 220px; }
+.jam-confirm[hidden], .jam-problem[hidden] { display: none; }
+
+/* inside the app the top bar already says Jam */
+body[data-screen="jam"] .jam-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* the top bar has its own Back button */
+body[data-screen="jam"] .jam-back { display: none; }
+
+/* transport */
+.jam-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-width: 0; max-width: 100%; }
+.jam-tempo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.jam-num, .jam-select {
+  height: 44px; border-radius: var(--radius-sm); border: 1px solid var(--pane-line); background: rgba(5, 8, 28, 0.55); color: var(--text); padding: 0 10px;
+}
+.jam-num { width: 76px; text-align: center; font-variant-numeric: tabular-nums; }
+.jam-select { max-width: 100%; min-width: 44px; }
+.jam-field { display: flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; max-width: 100%; }
+.jam-field-name { color: var(--muted); font-size: 13px; min-width: 3.2em; }
+.jam-range { flex: 1 1 110px; width: 100%; max-width: 100%; min-width: 0; height: 44px; min-height: 44px; accent-color: var(--accent); }
+.jam-out { min-width: 3em; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.jam-readout { margin-left: auto; font-family: var(--serif); font-size: 20px; font-variant-numeric: tabular-nums; color: var(--mint); min-width: 9.5em; max-width: 100%; text-align: right; }
+
+/* key, scale, effects */
+.jam-music { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-width: 0; max-width: 100%; }
+.jam-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; cursor: pointer; }
+.jam-check input { width: 22px; height: 22px; accent-color: var(--accent); }
+.jam-seg { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0; padding: 3px; border-radius: 999px; border: 1px solid var(--pane-line); background: rgba(5, 8, 28, 0.45); min-width: 0; max-width: 100%; }
+.jam-seg legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.jam-seg label { position: relative; }
+.jam-seg input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.jam-seg span { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 44px; padding: 0 12px; border-radius: 999px; color: var(--muted); font-size: 14px; }
+.jam-seg input:checked + span { background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1)); color: var(--text); }
+.jam-seg input:focus-visible + span { outline: 2px solid var(--mint); outline-offset: 1px; }
+
+/* tracks */
+.jam-tracks { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
+.jam-track { border: 1px solid var(--pane-line); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: 100%; background: rgba(5, 8, 28, 0.3); }
+.jam-track.sel { border-color: var(--accent-line); box-shadow: 0 0 20px -8px var(--glow-soft); }
+.jam-track.muted { opacity: .75; }
+.jam-track-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.jam .jam-trackname { min-width: 96px; justify-content: flex-start; }
+.jam .jam-trackname[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--mint); }
+.jam-track-head .jam-select { flex: 1 1 140px; min-width: 44px; }
+.jam-track-mix { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; min-width: 0; max-width: 100%; }
+.jam-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; max-width: 100%; }
+.jam-slot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.jam-slot-tap {
+  min-height: 52px; border-radius: var(--radius-sm); border: 1px solid var(--pane-line); background: rgba(255, 255, 255, 0.04);
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px; text-align: left;
+}
+.jam-slot-n { font-family: var(--serif); font-size: 20px; width: 1.2em; }
+.jam-slot-s { font-size: 13px; color: var(--muted); }
+.jam-slot-tap.sel { border-color: var(--outline); }
+.jam-slot-tap[data-state="empty"] { border-style: dashed; }
+.jam-slot-tap[data-state="has"] { background: rgba(255, 255, 255, 0.09); }
+.jam-slot-tap[data-state="playing"] { background: var(--accent-soft); border-color: var(--accent-line); }
+.jam-slot-tap[data-state="playing"] .jam-slot-s { color: var(--mint); }
+.jam-slot-tap[data-state="queued"], .jam-slot-tap[data-state="stopping"] { border-color: var(--amber); }
+.jam-slot-tap[data-state="armed"] { border-color: var(--star); background: rgba(240, 201, 135, 0.12); }
+.jam-slot-tap[data-state="recording"] { border-color: rgba(255, 122, 134, 0.8); background: rgba(255, 122, 134, 0.14); }
+.jam-slot-tap[data-state="recording"] .jam-slot-s::before { content: "\25CF  "; color: #ff7a86; }
+.jam-slot-acts { display: flex; gap: 6px; min-width: 0; }
+
+/* drum grid */
+.jam-gridwrap { overflow-x: auto; max-width: 100%; min-width: 0; padding-bottom: 6px; }
+.jam-grid { display: grid; grid-template-columns: 5.6rem repeat(var(--steps), minmax(46px, 1fr)); gap: 4px; align-items: center; min-width: max-content; max-width: none; }
+.jam-grid-name { font-size: 13px; color: var(--muted); position: sticky; left: 0; background: var(--pane); padding: 0 6px; height: 44px; display: flex; align-items: center; border-radius: 8px; z-index: 1; }
+.jam-cell { height: 44px; border-radius: 8px; border: 1px solid var(--pane-line); background: rgba(255, 255, 255, 0.04); }
+.jam-cell.beat { background: rgba(255, 255, 255, 0.09); }
+.jam-cell.on { background: var(--grad-accent); border-color: var(--accent-line); }
+.jam-cell.now { box-shadow: inset 0 0 0 2px var(--text); }
+.jam-cell.on.now { box-shadow: inset 0 0 0 2px var(--ink); }
+.jam-pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; min-width: 0; max-width: 100%; }
+.jam-pad {
+  min-height: 56px; border-radius: var(--radius-sm); border: 1px solid var(--pane-line); background: var(--glass-fill); box-shadow: var(--glass-edge);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.jam-pad small { color: var(--faint); font-size: 12px; }
+.jam-pad.down { background: var(--accent-soft); border-color: var(--accent-line); }
+
+/* keyboard */
+.jam-kbhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; max-width: 100%; }
+.jam-kbscroll { overflow-x: auto; max-width: 100%; min-width: 0; padding-bottom: 6px; }
+.jam-kb { position: relative; display: flex; height: 170px; min-width: calc(var(--whites) * 52px); max-width: none; user-select: none; -webkit-user-select: none; }
+.jam-key { touch-action: none; position: relative; }
+.jam-key.white {
+  flex: 1 1 0; min-width: 0; border: 1px solid rgba(7, 20, 43, 0.35); border-radius: 0 0 8px 8px; background: var(--key-white);
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px;
+}
+.jam-key-name { font-size: 12px; color: var(--ink); pointer-events: none; text-align: center; }
+.jam-key.black { position: absolute; top: 0; width: 5.2%; min-width: 36px; height: 62%; z-index: 2; border-radius: 0 0 6px 6px; background: #14193f; border: 1px solid #000; }
+/* a black key is narrower than a finger: its touch area reaches 4px past each side (44px at least) */
+.jam-key.black::before { content: ""; position: absolute; top: 0; bottom: -8px; left: -4px; right: -4px; }
+.jam-key.dim.white { background: var(--key-white-off); opacity: .45; }
+.jam-key.dim.black { opacity: .4; }
+.jam-key.root.white { box-shadow: inset 0 -5px 0 var(--accent-deep); }
+.jam-key.down.white { background: var(--mint); }
+.jam-key.down.black { background: var(--accent-deep); }
+
+@media (min-width: 640px) {
+  .jam { padding-inline: 24px; }
+  .jam-slots { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .jam-track-mix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .jam-pads { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
+@media (min-width: 1000px) {
+  .jam-grid { grid-template-columns: 5.6rem repeat(var(--steps), minmax(46px, 1fr)); }
+}
+
+/* the layout must fit the container, not the window: undo the wide-span grids and the side-by-side
+   fields from the media queries above whenever the Jam box itself is narrow */
+@container jam (max-width: 560px) {
+  .jam-track-mix { grid-template-columns: minmax(0, 1fr); }
+  .jam-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .jam-pads { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .jam-field { flex: 1 1 100%; }
+  .jam-readout { margin-left: 0; text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jam *, .jam *::before, .jam *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}

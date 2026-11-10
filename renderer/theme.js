@@ -55,6 +55,6 @@ export const LAYOUT = {
   headerHeight: 56
 }
 
-export const NOTE_VIEWS = ['CASCADE', 'RAINBOW', 'COLORNOTE', 'CLASSIC']
+export const NOTE_VIEWS = ['CASCADE', 'RAINBOW', 'COLORNOTE', 'CLASSIC', 'SHEET']
 export const NOTE_LABELS = ['off', 'names', 'fingers']
 export const MODES = ['WATCH', 'PRACTISE', 'PLAY']

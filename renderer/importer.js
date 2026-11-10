@@ -416,15 +416,17 @@ const tx = async (mode, fn) => {
   const d = await db()
   return new Promise((resolve, reject) => {
     const t = d.transaction(STORE, mode)
-    const out = fn(t.objectStore(STORE))
-    t.oncomplete = () => resolve(out && 'result' in out ? out.result : out)
-    t.onerror = () => reject(t.error)
+    let out
+    t.oncomplete = () => { d.close(); resolve(out && 'result' in out ? out.result : out) }
+    t.onerror = () => { d.close(); reject(t.error) }
+    t.onabort = () => { d.close(); reject(t.error || new DOMException('Song transaction aborted', 'AbortError')) }
+    try { out = fn(t.objectStore(STORE)) } catch (error) { t.abort(); d.close(); reject(error) }
   })
 }
 
-export async function saveImported(song) {
+function importedRecord(song) {
   const id = song.id || ('imp-' + Date.now().toString(36))
-  const record = {
+  return {
     id, file: 'imported:' + id, title: song.title, artist: song.artist || '', album: song.album || '',
     notes: song.notes, duration: song.duration, tempo: song.tempo,
     timeSignature: song.timeSignature || null, parts: song.parts || null, bars: song.bars || null, score: song.score || null,
@@ -432,8 +434,16 @@ export async function saveImported(song) {
     audio: song.audio || null,     // a File/Blob is stored as is (no copy into memory)
     source: song.source, added: song.added || Date.now()
   }
-  await tx('readwrite', (s) => s.put(record))
+}
+export async function saveImported(song) {
+  const record = importedRecord(song)
+  await tx('readwrite', (store) => store.put(record))
   return record
+}
+export async function saveImportedBatch(songs) {
+  const records = songs.map(importedRecord)
+  await tx('readwrite', (store) => { for (const record of records) store.put(record); return records })
+  return records
 }
 export const listImported = () => tx('readonly', (s) => s.getAll())
 // songs saved before fingering existed get it on the way out

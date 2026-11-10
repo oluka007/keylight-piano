@@ -1,0 +1,65 @@
+name: Device support
+description: A keyboard is missing, unlit or only half working. Adds support for real hardware.
+title: "Device support: "
+labels: ["device-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for keyboard problems: a device that is not found, stays dark, or
+        only half works.
+
+        **First, run Settings → Support my device** in Keylight. It walks through five
+        steps (Detect, Test, About you, Review, Send) and builds a plain-text report of
+        what the app can see. You read the exact text before anything leaves the app.
+        Then paste the report into the field below.
+
+        The report contains **no personal data** — no serial numbers, file paths, user
+        names, song titles, recordings, progress or the notes you played — and
+        **nothing is sent automatically**. It leaves your computer only because you
+        copy it here. Reports are how we add support for a new keyboard, so thank you.
+
+  - type: input
+    id: device
+    attributes:
+      label: Device name
+      description: The keyboard's make and model. This is the "Device" name the wizard prefilled, editable if you like.
+      placeholder: LUMI Keys
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      description: How is the keyboard connected?
+      options:
+        - USB
+        - Bluetooth
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: works
+    attributes:
+      label: What works, and what does not
+      description: Which parts of the keyboard work and which do not — for example notes, key lights, the arrow and mode buttons, octave, battery.
+      placeholder: |
+        Notes to the app: yes.
+        Key lights: no.
+        Arrow and mode buttons: not working.
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Support my device report
+      description: |
+        Paste the report from Settings → Support my device. It is safe to share: it
+        contains no serial numbers, file paths, user names, song titles or notes you
+        played, and Keylight never sends it anywhere by itself.
+      render: shell
+    validations:
+      required: true

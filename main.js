@@ -1,16 +1,27 @@
-const http = require('node:http')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const net = require('node:net')
 const { spawn, execFile } = require('node:child_process')
 const { setTimeout: sleep } = require('node:timers/promises')
+const { bindExternalNavigation } = require('./renderer/external-links.cjs')
+const { collectUsb, createProbeHandler, createCachedCollect } = require('./renderer/usb-probe.cjs')
+const { helperPath, createAirwaveBridge, collectDiagnostics } = require('./renderer/airwave-bridge.cjs')
+const { createBlocksdSupervisor } = require('./renderer/blocksd-supervisor.cjs')
+const appScheme = require('./renderer/app-scheme.cjs')
+const { migrationPlan, MARKER_FILE } = require('./renderer/origin-migration.cjs')
+const { createMaintenance } = require('./renderer/maintenance-host.cjs')
 
 // Under plain Node (scripts/test-watchdog.js) this file only lends out the blocksd
 // watchdog for testing: Electron, and with it the app, loads only under Electron.
-const { app, BrowserWindow, session, nativeTheme, screen } = process.versions.electron ? require('electron') : {}
+const { app, BrowserWindow, session, nativeTheme, screen, shell, ipcMain, protocol } = process.versions.electron ? require('electron') : {}
 
 const ROOT = path.join(__dirname, 'renderer')
+// A tester build names itself in package.json ("keylightBuild": { title, profile, port }) and
+// then keeps its own profile folder (so its progress and settings) and window title apart
+// from the normal app; its port is the old page address its saved data is moved from
+// (renderer/origin-migration.cjs). Normal builds have no such field.
+const BUILD = (() => { try { return require('./package.json').keylightBuild || null } catch (_e) { return null } })()
 // Keylight runs on macOS and Windows. The few things that differ (blocksd, the window
 // frame) check this; everything else is the same code on both.
 const IS_WIN = process.platform === 'win32'
@@ -55,34 +66,11 @@ function log(...args) {
   try { console.log(line) } catch (_e) {}
 }
 
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.mid': 'audio/midi', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png', '.xml': 'application/xml', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.bin': 'application/octet-stream' }
-
-function serve() {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const rel = decodeURIComponent((req.url || '/').split('?')[0])
-      const file = path.join(ROOT, rel === '/' ? 'index.html' : rel)
-      if (!file.startsWith(ROOT + path.sep) || !fs.existsSync(file)) { res.writeHead(404); return res.end('not found') }
-      res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' })
-      fs.createReadStream(file).pipe(res)
-    })
-    const start = (port, canRetry) => {
-      server.once('error', (e) => {
-        const why = (e && (e.code || e.message)) || 'error'
-        if (!canRetry) { log(`[server] could not listen on 127.0.0.1:${port} (${why})`); return }
-        // e.g. on Windows the port is in a range Hyper-V, WSL or Docker reserved: any free
-        // port works, but the page's origin then differs, so its saved progress does not show
-        server.once('listening', () => log(`[server] port ${port} unavailable (${why}), using ${server.address().port}: ` +
-          'progress saved on this run will not carry over'))
-        start(0, false)
-      })
-      server.listen(port, '127.0.0.1', () => resolve(server.address().port))
-    }
-    // Fixed port keeps the origin stable so localStorage progress persists.
-    // Test profiles (LUMI_USERDATA) take any free port so they never steal the real one.
-    start(Number(process.env.LUMI_PORT || (process.env.LUMI_USERDATA ? 0 : 47821)), true)
-  })
-}
+// The page is served at keylight://app (renderer/app-scheme.cjs), an address that never
+// changes. Up to 0.3.0 it was http://127.0.0.1:47821 (a tester build: its own port), which
+// moved to a random port, and so showed empty storage, whenever 47821 was taken. Saved
+// data still at that old address is moved across once (renderer/maintenance-host.cjs);
+// the old address is then only ever bound for that move.
 
 // ---- blocksd ------------------------------------------------------------------
 // The keyboard's per-key lighting is driven by the blocksd daemon. The app starts
@@ -92,6 +80,9 @@ function serve() {
 // the keys light from plain MIDI notes there (renderer/app.js, "Tier-B light fallback").
 
 const BLOCKSD = path.join(os.homedir(), '.local/bin/blocksd' + (IS_WIN ? '.exe' : ''))
+let daemonWindow = null   // the page that gets the daemon's status
+let mainWindow = null     // the app's window (hidden maintenance helpers are never it)
+const sendDaemonStatus = (st) => { if (daemonWindow && !daemonWindow.isDestroyed()) daemonWindow.webContents.send('daemon:status', st) }
 const LED_PORT = 9010
 const LED_WS_URL = `ws://127.0.0.1:${LED_PORT}/ws`
 
@@ -216,57 +207,30 @@ function readUsbDevices() {
   })
 }
 
-function run(cmd, args) {
-  return new Promise((resolve) => execFile(cmd, args, { timeout: 5000 }, (err) => resolve(!err)))
-}
-
-async function waitPortClosed(port, timeoutMs) {
-  const until = Date.now() + timeoutMs
-  while (await portOpen(port, 500)) {
-    if (Date.now() > until) return false
-    await sleep(250)
-  }
-  return true
-}
-
-let reportedMissingBlocksd = false
-function startBlocksd(reason) {
-  if (!fs.existsSync(BLOCKSD)) {
-    if (!reportedMissingBlocksd) log('[daemon] blocksd not installed at ' + BLOCKSD)
-    reportedMissingBlocksd = true
-    return
-  }
-  try {
-    const child = spawn(BLOCKSD, ['run'], { detached: true, stdio: 'ignore', windowsHide: true })
-    child.once('error', (e) => log('[daemon] failed to start blocksd: ' + e.message))
-    child.unref()
-    log('[daemon] started blocksd (' + reason + ')')
-  } catch (e) { log('[daemon] failed to start blocksd: ' + e.message) }
-}
-
-async function restartBlocksd() {
-  // never stop a daemon we could not start again
-  if (!fs.existsSync(BLOCKSD)) { log('[daemon] not restarting blocksd: not installed at ' + BLOCKSD); return }
-  await run('/usr/bin/pkill', ['-f', 'blocksd run'])
-  if (!(await waitPortClosed(LED_PORT, 10000))) {
-    log('[daemon] blocksd did not stop within 10 s: killing it')
-    await run('/usr/bin/pkill', ['-KILL', '-f', 'blocksd run'])
-    if (!(await waitPortClosed(LED_PORT, 5000))) { log('[daemon] port 9010 is still taken: not starting a second blocksd'); return }
-  }
-  log('[daemon] stopped blocksd')
-  startBlocksd('watchdog restart')
-}
+let blocksdSupervisor = null   // the tracked daemon child (bundled in the Mac app, or a hand-installed blocksd), when we run one
 
 // Checks blocksd now (starting it if it is not running) and then every 20 s. Test
 // profiles (LUMI_USERDATA) only do the first check, so they never restart the
 // daemon the real app is using; LUMI_WATCHDOG=1 or 0 forces the periodic check on or off.
-function startLedWatchdog() {
+// It watches the daemon's port and restarts only the child the app itself started; a blocksd found
+// already running is only watched, never touched.
+function startLedWatchdog(supervisor) {
+  // the daemon's port can change (a retry may pick another): ask for the current one on every check
+  const portNow = () => (supervisor && supervisor.port ? supervisor.port : LED_PORT)
   const watchdog = createLedWatchdog({
-    probe: () => discoverLedDevices(LED_WS_URL, WATCHDOG.replyMs),
-    portOpen: () => portOpen(LED_PORT),
+    probe: () => discoverLedDevices(`ws://127.0.0.1:${portNow()}/ws`, WATCHDOG.replyMs),
+    portOpen: () => portOpen(portNow()),
     readUsb: readUsbDevices,
-    start: () => startBlocksd('it was not running'),
-    restart: restartBlocksd,
+    // our own child restarts itself; the watchdog never starts or stops anything else
+    // a daemon that went away (an external one quit, ours gave up): look again, which starts our own if none answers
+    start: async () => {
+      if (supervisor && (supervisor.external || supervisor.detail === 'failed')) { log('[watchdog] no daemon answers: looking again'); await supervisor.retry() }
+      else log('[watchdog] nothing to start: ' + (supervisor ? 'the daemon is ' + supervisor.detail : 'no daemon of ours is running'))
+    },
+    restart: async () => {
+      if (supervisor && !supervisor.external && await supervisor.restart()) return
+      log('[watchdog] not restarting a blocksd the app did not start')
+    },
     now: () => performance.now(),
     log
   })
@@ -277,6 +241,13 @@ function startLedWatchdog() {
     if (periodic) setTimeout(check, WATCHDOG.everyMs)
   }
   check()
+}
+
+// The daemon folder inside the packaged Mac app (scripts/package.sh puts it there), or null
+function bundledBlocksd() {
+  if (IS_WIN || !app || !app.isPackaged || !process.resourcesPath) return null
+  const exe = path.join(process.resourcesPath, 'blocksd', 'blocksd')
+  return fs.existsSync(exe) ? exe : null
 }
 
 // ---- capture --------------------------------------------------------------------
@@ -411,16 +382,16 @@ async function captureFrames(win, dir, fps, seconds) {
 // ---- takes ----------------------------------------------------------------------
 // The take recorder (renderer/recorder.js) saves a take by downloading its video and
 // its JSON sidecar from blob: URLs. Only downloads named like a take AND made from
-// this app's own page (a blob: URL of http://127.0.0.1:<the port it is served on>)
-// are handled here: they go straight to LUMI_REC_DIR, or Movies/Keylight, with no
+// this app's own page (a blob: URL of keylight://app, renderer/app-scheme.cjs) are
+// handled here: they go straight to LUMI_REC_DIR, or Movies/Keylight, with no
 // dialog. Every other download is left alone.
 const TAKE_FILE = /^(keylight-take-\d{8}-\d{6})\.(mp4|webm|json)$/
-const BLOB_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-function isTakeDownload(filename, url, port) {
-  if (!TAKE_FILE.test(String(filename || ''))) return false
-  const p = Number(port)
-  if (!Number.isInteger(p) || p <= 0 || p > 65535) return false
-  return new RegExp(`^blob:http://127\\.0\\.0\\.1:${p}/${BLOB_ID}$`, 'i').test(String(url || ''))
+const BLOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function isTakeDownload(filename, url, origin = appScheme.APP_ORIGIN) {
+  if (!TAKE_FILE.test(String(filename || '')) || typeof origin !== 'string' || !origin) return false
+  const prefix = ('blob:' + origin + '/').toLowerCase()
+  const text = String(url || '')
+  return text.slice(0, prefix.length).toLowerCase() === prefix && BLOB_ID.test(text.slice(prefix.length))
 }
 
 const takeDir = () => process.env.LUMI_REC_DIR || path.join(app.getPath('videos'), 'Keylight')
@@ -429,14 +400,14 @@ const takeDir = () => process.env.LUMI_REC_DIR || path.join(app.getPath('videos'
 // finished saving (or failed). Returns { finished(), saving(), idle(since, files, ms) }: idle
 // resolves once `files` take files have finished since finished() read `since`, and
 // none is still saving, or after ms.
-function handleTakeDownloads(port) {
+function handleTakeDownloads(origin) {
   const takes = new Map()   // stem -> { suffix, video, json }: a take's two files keep one name
   let saving = 0, finished = 0
   const waiters = new Set()
   const wake = () => { for (const w of waiters) w() }
   session.defaultSession.on('will-download', (_e, item) => {
     const name = item.getFilename()
-    if (!isTakeDownload(name, item.getURL(), port)) return
+    if (!isTakeDownload(name, item.getURL(), origin)) return
     const [, stem, ext] = name.match(TAKE_FILE)
     const dir = takeDir()
     let entry = takes.get(stem)
@@ -520,7 +491,7 @@ function startApp() {
   // screenshot/test runs their own profile (and their own single-instance lock) so
   // they can run beside the real app.
   let profileError = null
-  try { app.setPath('userData', process.env.LUMI_USERDATA || path.join(app.getPath('appData'), 'lumi-app')) } catch (e) { profileError = e }
+  try { app.setPath('userData', process.env.LUMI_USERDATA || path.join(app.getPath('appData'), BUILD?.profile || 'lumi-app')) } catch (e) { profileError = e }
   openLog(app.getPath('userData'))
   log('--- app start pid=' + process.pid + ' version=' + app.getVersion() + ' packaged=' + app.isPackaged)
   if (profileError) log('could not use the profile folder, using ' + app.getPath('userData') + ': ' + profileError.message)
@@ -531,10 +502,23 @@ function startApp() {
   // spawning a rival renderer that fights over the LED daemon.
   if (!app.requestSingleInstanceLock()) { app.quit(); return }
   app.on('second-instance', () => {
-    const win = BrowserWindow.getAllWindows()[0]
+    // the app's own window, never a hidden maintenance helper
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
     if (win) { if (win.isMinimized()) win.restore(); if (IS_WIN) win.show(); win.focus() }
   })
+  // keylight://app must be known before the app is ready (renderer/app-scheme.cjs)
+  protocol.registerSchemesAsPrivileged([{ scheme: appScheme.SCHEME, privileges: appScheme.PRIVILEGES }])
   app.whenReady().then(openWindow)
+  // The daemon in the app goes down with it: wait (up to ~2 s) for it to exit, then quit for real.
+  // app.exit() paths (self-test, errors) skip before-quit, so 'exit' signals it too.
+  let daemonStopped = false
+  app.on('before-quit', (event) => {
+    if (!blocksdSupervisor || daemonStopped) return
+    daemonStopped = true
+    event.preventDefault()
+    blocksdSupervisor.stop().catch(() => {}).finally(() => app.quit())
+  })
+  process.on('exit', () => { if (blocksdSupervisor) blocksdSupervisor.stopNow() })
 }
 
 // Windows: Electron's default menu bar (File, Edit, View…) hides until Alt is pressed,
@@ -574,16 +558,31 @@ async function openWindow() {
   // blocksd runs on macOS and Linux only: on Windows it is never started or restarted, and
   // the keys light over MIDI. The page still uses a blocksd that is already running on
   // port 9010. LUMI_NO_KEYBOARD runs (tests, clips) keep off the keyboard and blocksd.
+  // The packaged Mac app carries its own blocksd (renderer/blocksd-supervisor.cjs): the page gets its
+  // port as ?daemonPort=. Unpackaged runs and a blocksd someone installed keep working as before.
+  let daemonQuery = ''
   if (IS_WIN) log('[daemon] Windows: blocksd is not started (it runs on macOS and Linux); the keys light over MIDI')
   else if (process.env.LUMI_NO_KEYBOARD === '1') log('[daemon] LUMI_NO_KEYBOARD: not checking blocksd')
-  else startLedWatchdog()
-  const port = await serve()
+  else {
+    const bundled = bundledBlocksd()
+    if (bundled || fs.existsSync(BLOCKSD)) {
+      blocksdSupervisor = createBlocksdSupervisor({ spawn, executable: bundled || BLOCKSD, log,
+        ...(bundled ? { configDir: app.getPath('userData'), pidFile: path.join(app.getPath('userData'), 'blocksd.pid') } : { fixedPort: LED_PORT }),
+        env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir(), LANG: 'en_US.UTF-8' },
+        onState: (st) => sendDaemonStatus(st) })
+      const started = await blocksdSupervisor.start()
+      if (bundled) daemonQuery = `bundledDaemon=1&daemonStart=${blocksdSupervisor.state}` + (started.mode === 'bundled' ? `&daemonPort=${started.port}` : '')
+    } else log('[daemon] blocksd is not installed at ' + BLOCKSD)
+    startLedWatchdog(blocksdSupervisor)
+  }
+  const { Readable } = require('node:stream')
+  protocol.handle(appScheme.SCHEME, appScheme.createAppHandler({ root: ROOT, Readable }))
   // Web MIDI + SysEx, the camera (hand tracking) and the rest are granted to this app's
   // own page only, never to another origin
-  const own = (url) => { try { return new URL(url).origin === `http://127.0.0.1:${port}` } catch (_e) { return false } }
+  const own = appScheme.isAppUrl
   session.defaultSession.setPermissionRequestHandler((wc, _permission, cb, details) => cb(own((details && details.requestingUrl) || (wc && wc.getURL()))))
   session.defaultSession.setPermissionCheckHandler((_wc, _permission, origin) => own(origin))
-  const takes = handleTakeDownloads(port)
+  const takes = handleTakeDownloads(appScheme.APP_ORIGIN)
   // Test, screenshot and self-test runs must not take the screen from whatever the
   // user is doing (a game, say): no Dock icon, and the window is shown invisible and
   // without activating the app. capturePage still sees the page at full opacity.
@@ -591,12 +590,39 @@ async function openWindow() {
   if (QUIET && app.dock) app.dock.hide()
   const win = new BrowserWindow({
     width: 1280, height: 820, backgroundColor: '#151245',
-    title: 'Keylight',
+    title: BUILD?.title || 'Keylight',
     show: !QUIET,
     ...(IS_WIN ? windowsWindowOptions(QUIET) : {}),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
+      preload: path.join(ROOT, 'preload.cjs') }
+  })
+  bindExternalNavigation(win.webContents, {
+    isOwn: own,
+    open: (url) => shell.openExternal(url).catch((error) => log('[browser] could not open link: ' + error.message))
   })
   saveTakeOnClose(win, takes)
+  daemonWindow = mainWindow = win
+  ipcMain.handle('daemon:status', (event) => (own(event.senderFrame?.url) ? (blocksdSupervisor ? blocksdSupervisor.status() : { state: 'none', port: null, reason: '' }) : null))
+  // "Try again" on the setup/settings: look for an external daemon again, else start our own
+  ipcMain.handle('daemon:retry', async (event) => {
+    if (!own(event.senderFrame?.url) || !blocksdSupervisor) return null
+    await blocksdSupervisor.retry()
+    return blocksdSupervisor.status()
+  })
+  // Experimental Airwave source: the page may start Keylight's own helper process, only when
+  // the person presses Connect, and only the page of this app may ask.
+  // the helper gets a minimal environment: the KEYLIGHT_* test overrides and what loading a library needs
+  const helperEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('KEYLIGHT_') || ['PATH', 'SystemRoot', 'ProgramFiles'].includes(k)))
+  const airwave = createAirwaveBridge({ spawn, log, env: helperEnv,
+    findHelper: () => helperPath({ root: __dirname, resourcesPath: process.resourcesPath, packaged: app.isPackaged, exists: fs.existsSync }),
+    send: (message) => { if (!win.isDestroyed()) win.webContents.send('airwave:message', message) } })
+  ipcMain.handle('airwave:start', (event) => (own(event.senderFrame?.url) ? airwave.start() : { ok: false, reason: 'refused' }))
+  ipcMain.handle('airwave:stop', (event) => { if (own(event.senderFrame?.url)) airwave.stop(); return { ok: true } })
+  // Why no camera is listed: read-only driver-extension, process-name and install-folder probes, only when the report is exported
+  ipcMain.handle('airwave:diagnostics', (event) => (own(event.senderFrame?.url) ? collectDiagnostics({ execFile, fs, release: os.release(), user: os.userInfo().username }) : null))
+  // "Support my device": USB descriptors without serials or locations, only when the person opens the step
+  ipcMain.handle('device:usb', createProbeHandler({ own, collect: createCachedCollect(() => collectUsb({ spawn })) }))
+  win.on('closed', () => { airwave.stop(); ipcMain.removeHandler('airwave:start'); ipcMain.removeHandler('airwave:stop'); ipcMain.removeHandler('airwave:diagnostics'); ipcMain.removeHandler('device:usb') })
   if (QUIET) {
     win.setOpacity(0)
     win.once('ready-to-show', () => win.showInactive())
@@ -607,7 +633,39 @@ async function openWindow() {
   let query = process.env.LUMI_SELFTEST ? '?selftest=1' : ''
   if (process.env.LUMI_QUERY) query = '?' + process.env.LUMI_QUERY
   if (process.env.LUMI_NO_KEYBOARD === '1') query += (query ? '&' : '?') + 'nokb=1'
-  win.loadURL(`http://127.0.0.1:${port}/index.html${query}`)
+  query += (query ? '&' : '?') + 'appVersion=' + encodeURIComponent(app.getVersion())
+  if (daemonQuery) query += '&' + daemonQuery
+
+  // Saved data still at the old page address moves across before the page (which reads its
+  // settings and course progress as it loads) is opened. The window exists by now, so the
+  // hidden helper closing never leaves the app without a window.
+  const profileDir = app.getPath('userData')
+  const maintenance = createMaintenance({ BrowserWindow, ipcMain, session: session.defaultSession, root: ROOT, profileDir, appOrigin: appScheme.APP_ORIGIN, log })
+  let markerText = ''
+  try { markerText = fs.readFileSync(path.join(profileDir, MARKER_FILE), 'utf8') } catch (_e) {}
+  const move = migrationPlan({ env: process.env, buildPort: BUILD?.port, markerText })
+  if (move.attempt) await maintenance.migrate(move).catch((e) => log('[migrate] failed: ' + ((e && e.message) || e)))
+  else if (move.reason !== 'already moved') log('[migrate] not moving saved data: ' + move.reason)
+  if (win.isDestroyed()) return
+  win.loadURL(`${appScheme.APP_ORIGIN}/index.html${query}`)
+
+  // An automatic backup (at most one a day, the last three kept) a little after the page
+  // is up, then looked at again every 6 hours for an app left open across days. Self-test,
+  // screenshot and video runs skip it unless LUMI_BACKUP=1; LUMI_BACKUP=0 turns it off.
+  const backupFlag = process.env.LUMI_BACKUP
+  if (backupFlag ? backupFlag === '1' : !(process.env.LUMI_SELFTEST || process.env.LUMI_SHOT || process.env.LUMI_FRAMES)) {
+    let backingUp = false
+    const backupNow = () => {
+      if (win.isDestroyed() || backingUp) return
+      backingUp = true
+      maintenance.backup().catch((e) => log('[backup] failed: ' + ((e && e.message) || e))).finally(() => { backingUp = false })
+    }
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(backupNow, numberEnv('LUMI_BACKUP_DELAY', 20, 1, 3600) * 1000)
+      const every = setInterval(backupNow, 6 * 3600 * 1000)
+      win.once('closed', () => clearInterval(every))
+    })
+  }
 
   const framesDir = process.env.LUMI_FRAMES
   const shotFile = process.env.LUMI_SHOT

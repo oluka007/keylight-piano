@@ -1,0 +1,149 @@
+/* Phones and tablets (linked last). Three jobs: fit a narrow screen (the tab bar, the top bar, the course and exercise
+   pages), make every control a finger-sized target on a touch screen, and tidy what only a computer has (shortcut hints).
+   Nothing here changes a desktop window wider than 700px with a mouse. */
+
+/* ---------- touch: no hover-only states, no double-tap zoom, no text selection on the playing surfaces ---------- */
+html.touch, html.touch body { -webkit-tap-highlight-color: transparent; }
+html.touch button, html.touch [role="button"], html.touch select, html.touch label, html.touch .cover-tile, html.touch .cr-level { touch-action: manipulation; }
+#stage, .ex-padsvg, .rx-pad { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+@media (pointer: coarse) {
+  .iconbtn, .hudbtn, .kb-chip, .mini-btn, .ghost, .chips button, .chip-btn, .settings-jump button, .toast-action, .oct-mini,
+  .primary, .speed-track button, .cr-back, .ob-actions button { min-height: 44px; }
+  .iconbtn, .oct-mini, .hudbtn { min-width: 44px; }
+  .setting select, .setting input[type="color"] { min-height: 44px; }
+  /* the switch keeps its 42 x 24 track (a 24px square squeezed the knob out of it); the whole .setting row, 48px high, is the tap target */
+  .setting, .setting-row { min-height: 48px; }
+  .setting input[type="range"] { min-height: 44px; }
+  #nav button { min-height: 54px; }
+}
+
+/* ---------- the shortcuts overlay is for a keyboard: offered on Android once a real key has been pressed ---------- */
+html.android:not(.has-keys) #openShortcuts, html.android:not(.has-keys) #aboutShortcuts { display: none; }
+html.android .ob-install { display: none !important; }       /* the desktop light-service steps (Terminal, Homebrew) */
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 700px) {
+  #nav { left: 12px; right: 12px; width: auto; max-width: none; transform: none; padding: 5px; gap: 2px; }
+  #nav button { flex: 1 1 0; width: auto; min-width: 0; padding: 0 2px; font-size: 10.5px; letter-spacing: 0; }
+  #nav button span, #nav button { white-space: nowrap; }
+  /* the Home top bar (keyboard chip and settings) is a solid band while the page scrolls under it */
+  .home-head { min-height: 0; }
+  /* the player's button row: tighter gaps so all eight 44px targets fit a 412px phone; at 360px it still scrolls sideways */
+  /* Search: the pill gets its own full-width row under the keyboard chip (it was a 180px pill sitting on top of the chip); the level chips scroll sideways instead of taking three rows */
+  body[data-screen="search"] #topbar { height: auto; flex-wrap: wrap; align-content: flex-start; row-gap: 8px; padding-bottom: 4px; }
+  body[data-screen="search"] .top-left { display: none; }
+  body[data-screen="search"] .top-actions { order: 1; }
+  body[data-screen="search"] .top-search { position: static; transform: none; order: 2; flex: 1 0 100%; width: 100%; }
+  body[data-screen="search"] .level-chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: calc(var(--gutter) * -1); padding-inline: var(--gutter); scrollbar-width: none; }
+  body[data-screen="search"] .level-chips button { flex: none; }
+  body[data-screen="play"] .hud-actions { gap: 2px; }
+  body[data-screen="play"] .hud-octave { min-width: 80px; }
+}
+@media (max-width: 900px) {
+  body[data-screen="home"] #topbar {
+    left: 0; right: 0; top: 0; padding: 8px var(--gutter); justify-content: flex-end; height: auto;
+    background: linear-gradient(180deg, var(--bg-deep) 72%, rgba(5, 7, 22, 0));
+  }
+  body[data-screen="home"] #screen-home { padding-top: 64px; }
+  .home-stats { justify-content: flex-start; }
+}
+@media (pointer: coarse) { .cover-tile .heart, .heart { min-width: 44px; min-height: 44px; margin: -9px -9px -9px 0; display: inline-grid; place-items: center; } }
+
+/* programmatic focus (a heading after a screen change) is not a tap target: no ring on touch */
+html.touch [tabindex="-1"]:focus-visible { outline: 0; box-shadow: none; }
+@media (pointer: coarse) { .link, summary { min-height: 44px; display: inline-flex; align-items: center; } .cr-toggle { min-height: 44px; } }   /* .cr-toggle keeps its own column layout: centring it here centred the level titles */
+@media (max-width: 700px) { .home-stats { justify-content: flex-start; } }
+
+/* a phone on its side: one short row for back, speed and the player buttons (icons only), so the notes get the height */
+@media (max-height: 520px) and (orientation: landscape) {
+  body[data-screen="play"] #topbar { grid-template-columns: 44px auto minmax(0, 1fr); grid-template-rows: auto; padding: 4px 12px; gap: 8px; }
+  body[data-screen="play"] .top-center { grid-column: 2; grid-row: 1; }
+  body[data-screen="play"] .top-actions { grid-column: 3; grid-row: 1; width: auto; }
+  body[data-screen="play"] .hudbtn { height: 44px; }
+  body[data-screen="play"] .hudbtn .lbl, body[data-screen="play"] .hud-octave .lbl { display: none; }
+  body[data-screen="play"] .hud-octave { height: 44px; min-width: 88px; }
+  body[data-screen="play"] .toast { top: 60px; }
+  .player-bottom { padding: 8px 14px; flex-wrap: nowrap; }
+  .screen { padding-bottom: 96px; }
+}
+@media (pointer: coarse) { body[data-screen="play"] .oct-btn { width: 44px; height: 44px; } }
+@media (pointer: coarse) { dialog button, .ds-steps button, .ds-steps li { min-height: 44px; } }
+
+/* a phone on its side, or a 7-inch tablet (under 600px high): the tab bar becomes a slim rail down the left edge (the pill along the bottom covered a third of a 360px-high screen and hid the lesson keyboard on a 536px one) */
+@media (max-height: 600px) and (orientation: landscape) {
+  #nav { left: calc(8px + env(safe-area-inset-left, 0px)); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); width: 72px; max-width: none; height: auto; flex-direction: column; padding: 4px; gap: 2px; border-radius: 24px; }
+  #nav button { flex: none; width: 100%; height: 50px; min-height: 50px; border-radius: 19px; font-size: 9px; padding: 0; gap: 2px; }
+  #nav button svg { width: 20px; height: 20px; }
+  .nav-ind { display: none; }
+  #nav.has-ind button.on { background: linear-gradient(180deg, rgba(124, 240, 198, 0.17), rgba(124, 240, 198, 0.05)); box-shadow: inset 0 0 0 1px rgba(124, 240, 198, 0.24); }
+  body:not([data-screen="play"]) .screen, body:not([data-screen="play"]) #topbar { padding-left: calc(92px + env(safe-area-inset-left, 0px)); }
+  body[data-screen="home"] #topbar { padding-left: 0; }
+  .screen { padding-bottom: 28px; }
+}
+
+/* 360px phones: the screen title ("Settings") shares a row with back, the keyboard chip and settings, so it gets a size that fits */
+@media (max-width: 400px) {
+  body:not([data-screen="play"]) #title { font-size: 23px; }
+  #topbar, .top-left { gap: 6px; }
+  .kb-chip { padding-inline: 8px; gap: 6px; }
+}
+
+/* a phone on its side: the sheet-music strip would take the height the falling notes need (the stage shrank to a 25px sliver) */
+@media (max-height: 520px) and (orientation: landscape) { body[data-screen="play"] #sheetStrip:not(.sheet-only) { display: none; } }
+
+/* tablet in portrait: the centred search pill was 280px and cut its own placeholder */
+@media (min-width: 701px) and (max-width: 900px) { .top-search { width: 340px; } }
+
+/* 7-inch tablet on its side (521 to 600px high): a shorter sheet strip, so the falling notes keep room */
+@media (min-height: 521px) and (max-height: 600px) and (orientation: landscape) { body[data-screen="play"] .sheet-strip:not(.sheet-only) { height: 104px; } }
+
+/* Home on a narrow portrait phone: the hero card stacks (cover art across the top, then the title and two full-width buttons)
+   instead of a small cover floating beside a three-line title */
+@media (max-width: 520px) {
+  .hero { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 14px 14px 18px; border-radius: 28px; }
+  .hero-art { transform: none; aspect-ratio: 16 / 10; width: 100%; height: auto; border-radius: 20px; box-shadow: 0 18px 32px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.12); }
+  .hero-art .cover img.c-img { object-position: center 35%; }
+  .hero-body { padding: 0 4px; }
+  .hero-title { font-size: clamp(26px, 8vw, 32px); line-height: 1.08; margin: 8px 0 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .hero-sub { font-size: 18px; }
+  .hero-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+  .hero-actions .primary, .hero-actions .ghost { width: 100%; justify-content: center; height: 48px; }
+  .rail { grid-auto-columns: 148px; gap: 14px; }
+}
+
+/* ---------- iPhone and iPad app only (html.ios) ---------- */
+/* the octave box: two 44px touch targets plus the range label are taller than the 48px the wrapped HUD row gives it, which clipped
+   "C3–B4"; it grows to fit its content instead */
+@media not all and (max-height: 520px) and (orientation: landscape) {   /* (a phone on its side hides the label) */
+  html.ios body[data-screen="play"] .hud-octave { height: auto; min-height: 48px; padding-block: 2px 3px; }
+}
+
+/* Home's top bar is fixed to the screen edge, so it ignored the notch: keep it below the status bar and Dynamic Island */
+@media (max-width: 900px) {
+  html.ios body[data-screen="home"] #topbar { padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
+}
+
+/* a phone on its side: the player runs edge to edge, so keep it clear of the Dynamic Island / notch and the rounded corners
+   (the other screens already clear them through the nav rail's padding) */
+html.ios body[data-screen="play"] #app { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+
+/* dialogs stay between the status bar / Dynamic Island and the home indicator */
+html.ios dialog[open] {
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  margin-top: calc(12px + env(safe-area-inset-top, 0px)); margin-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+/* the first-run setup is a full-screen layer outside #app: clear the status bar, Dynamic Island, rounded corners and home indicator */
+html.ios #onboarding {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+}
+
+/* a phone on its side: the note game's question shrinks so its keys fit on the same screen */
+@media (max-height: 520px) and (orientation: landscape) {
+  html.android .quiz { padding: 12px 24px 14px; }
+  html.android .quiz-prompt { min-height: 0; font-size: 72px; }
+  html.android .quiz-prompt svg { max-height: 130px; }
+  html.android .quiz-help { min-height: 0; margin-bottom: 6px; font-size: 14px; }
+  html.android .quiz-pad { max-width: 330px; }
+}

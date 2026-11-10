@@ -1,0 +1,47 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f6fc;
+  --text: #151245;
+  --muted: #56516d;
+  --accent: #0064c8;
+  --link: #0055aa;
+  --line: #d3d0e1;
+  --button-ink: #fff;
+  --focus: #0064c8;
+  --space: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151245; --text: #fff; --muted: #c0bdd6; --link: #a9ccff; --line: #555170; --focus: #a9ccff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 system-ui, sans-serif; }
+header, main, footer { width: min(100% - 48px, 68ch); margin-inline: auto; }
+header { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding-block: 24px; }
+.wordmark { color: var(--text); font-weight: 700; font-size: 22px; text-decoration: none; }
+main { padding-block: 48px 32px; }
+h1 { font-size: clamp(32px, 6vw, 48px); line-height: 1.12; letter-spacing: -.025em; margin: 0 0 32px; }
+h2 { font-size: 28px; line-height: 1.25; margin: 0 0 24px; letter-spacing: -.01em; }
+h3 { font-size: 22px; line-height: 1.3; margin: 0 0 8px; }
+p { margin: 0 0 24px; text-wrap: pretty; }
+.lead { font-size: 20px; line-height: 1.5; }
+.note { color: var(--muted); font-size: 15px; margin-top: 16px; }
+a { color: var(--link); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.primary { background: var(--accent); color: var(--button-ink); display: inline-flex; padding: 12px 24px; border-radius: 12px; font-weight: 600; text-decoration: none; min-height: 48px; align-items: center; }
+.primary:hover { background: #0055aa; text-decoration: none; }
+.primary:active { background: #004c99; }
+section { margin-top: 64px; }
+.downloads { list-style: none; padding: 0; margin: 0; }
+.downloads li { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-block: 24px; border-bottom: 1px solid var(--line); }
+.downloads li:first-child { padding-top: 0; }
+.downloads p { color: var(--muted); margin: 0; font-size: 15px; max-width: 40ch; }
+.downloads a, .support { display: inline-flex; min-height: 44px; align-items: center; flex-shrink: 0; }
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; padding-block: 24px 32px; }
+::selection { color: var(--button-ink); background: var(--accent); }
+@media (max-width: 600px) {
+  header, main, footer { width: calc(100% - 32px); }
+  main { padding-top: 32px; }
+  .downloads li { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .note, .downloads p, footer { font-size: 16px; }
+}

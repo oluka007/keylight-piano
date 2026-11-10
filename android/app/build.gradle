@@ -1,0 +1,76 @@
+plugins { id 'com.android.application' }
+def keylightVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def versionParts = keylightVersion.tokenize('.').collect { it.toInteger() }
+// versionCode = major*10000 + minor*100 + patch. KEYLIGHT_BUILD_NUMBER (0-99, optional) makes it
+// base*100 + n so a re-upload of the same version still increases. Once used, always use it.
+def baseVersionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+def buildNumber = (System.getenv('KEYLIGHT_BUILD_NUMBER') ?: '').trim()
+if (buildNumber && !(buildNumber ==~ /\d{1,2}/)) throw new GradleException('KEYLIGHT_BUILD_NUMBER must be 0-99')
+def releaseRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+def releaseKeystore = System.getenv('KEYLIGHT_KEYSTORE')
+def releasePassword = System.getenv('KEYLIGHT_KEYSTORE_PASSWORD')
+if (releaseRequested) {
+    if (!releaseKeystore || !file(releaseKeystore).isFile() || !releasePassword) {
+        throw new GradleException('Release build needs the upload keystore: set KEYLIGHT_KEYSTORE (file) and KEYLIGHT_KEYSTORE_PASSWORD, or run scripts/android-keystore.sh and build with scripts/package-android.sh --release')
+    }
+}
+
+android {
+    namespace 'org.keylight.piano'
+    compileSdk { version = release(36) { minorApiLevel = 1 } }
+    buildToolsVersion '36.1.0'
+    defaultConfig {
+        applicationId 'org.keylight.piano'
+        minSdk 26
+        targetSdk 36
+        versionCode buildNumber ? baseVersionCode * 100 + buildNumber.toInteger() : baseVersionCode
+        versionName releaseRequested ? keylightVersion : keylightVersion + '-android-dev'
+    }
+    signingConfigs {
+        if (System.getenv('KEYLIGHT_ANDROID_KEYSTORE')) {
+            development {
+                storeFile file(System.getenv('KEYLIGHT_ANDROID_KEYSTORE'))
+                storePassword System.getenv('KEYLIGHT_ANDROID_PASSWORD')
+                keyAlias 'keylight-development'
+                keyPassword System.getenv('KEYLIGHT_ANDROID_PASSWORD')
+            }
+        }
+        if (releaseRequested) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword releasePassword
+                keyAlias System.getenv('KEYLIGHT_KEY_ALIAS') ?: 'keylight-upload'
+                keyPassword releasePassword
+            }
+        }
+    }
+    buildTypes {
+        debug { if (signingConfigs.findByName('development')) signingConfig signingConfigs.development }
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (signingConfigs.findByName('release')) signingConfig signingConfigs.release
+        }
+    }
+    bundle { language { enableSplit = false } }
+    buildFeatures { buildConfig true }
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('bundled-assets')
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+tasks.register('bundleRenderer', Sync) {
+    from('../../renderer') { into 'renderer' }
+    from('../host-bootstrap.js') { into 'renderer' }
+    from('../../LICENSE')
+    from('../../THIRD_PARTY_NOTICES.md')
+    from('../../LICENSES') { into 'LICENSES' }
+    into layout.buildDirectory.dir('bundled-assets')
+    doLast {
+        def index = new File(destinationDir, 'renderer/index.html')
+        index.text = index.text.replace('<head>', '<head>\n<script type="module" src="host-bootstrap.js"></script>')
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'bundleRenderer' }
+dependencies { implementation 'androidx.webkit:webkit:1.14.0' }

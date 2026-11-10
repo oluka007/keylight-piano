@@ -1,0 +1,111 @@
+name: Bug report
+description: Something broke, crashed, looked wrong or scored unfairly.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search the existing issues
+        first, and fill in as much as you can.
+
+        If the problem is with a **keyboard** (not found, unlit, or only half working),
+        please use the **Device support** form instead: it asks for the output of
+        Settings → Support my device, which is what we need for keyboard problems.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the bug, and what you were doing when it happened.
+      placeholder: When I pressed Play, the notes stopped moving and the app froze.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened instead.
+      placeholder: The notes should keep falling and the keys should light up.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, starting from opening the app.
+      placeholder: |
+        1. Open Keylight
+        2. Go to Search and open a song
+        3. Press Play
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where are you running Keylight?
+      options:
+        - Mac
+        - Windows
+        - Android
+        - iPhone / iPad (sideload)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Keylight version
+      description: Shown in Settings → About.
+      placeholder: 0.3.0
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: Your operating system and version.
+      placeholder: macOS 13.6 / Windows 11 23H2 / Android 13
+    validations:
+      required: true
+
+  - type: dropdown
+    id: keyboard
+    attributes:
+      label: Keyboard
+      description: Which keyboard, if any, is connected?
+      options:
+        - LUMI Keys
+        - ROLI Piano M
+        - 49-key ROLI Piano
+        - Two keyboards joined
+        - No keyboard
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: |
+        Paste the log if the app misbehaved (Mac: `~/Library/Application Support/lumi-app/app.log`;
+        Windows: `%APPDATA%\lumi-app\app.log`), or attach screenshots or a short clip.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched the existing issues and this is not a duplicate.
+          required: true

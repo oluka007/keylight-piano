@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Download Keylight, the free, open-source piano learning app. Optional contributions support development.">
+  <title>Download Keylight</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><a href="https://github.com/scizerss/keylight-piano" class="wordmark">Keylight</a><a href="https://github.com/scizerss/keylight-piano">Source code</a></header>
+  <main>
+    <h1>Your keyboard.<br>Your next song.</h1>
+    <p class="lead">Learn with falling notes, sheet music and keys that show you what to play. Keylight is free and open source.</p>
+    <a class="primary" id="freeDownload" href="https://github.com/scizerss/keylight-piano/releases/latest">Download for free</a>
+    <p class="note">No account, subscription or payment required. Your music and progress stay on your device.</p>
+
+    <section aria-labelledby="downloadsTitle">
+      <h2 id="downloadsTitle">Choose your device</h2>
+      <p id="releaseStatus" role="status">All published downloads and installation instructions are available on the releases page.</p>
+      <ul class="downloads">
+        <li><div><h3>Mac</h3><p>Apple Silicon, macOS 13 or later.</p></div><a id="macDownload" href="https://github.com/scizerss/keylight-piano/releases/latest">Mac downloads</a></li>
+        <li><div><h3>Windows</h3><p>Windows 10 or 11, 64-bit. Beta.</p></div><a id="winDownload" href="https://github.com/scizerss/keylight-piano/releases/latest">Windows downloads</a></li>
+        <li><div><h3>Android tablets</h3><p id="androidStatus">An APK link appears here when an Android build is published. USB MIDI requires a compatible tablet and keyboard.</p></div><a id="androidDownload" href="https://github.com/scizerss/keylight-piano/releases/latest">Check Android releases</a></li>
+      </ul>
+      <p class="note">Mac and Windows builds may show a security warning while they are unsigned. Read the release's installation instructions before opening them.</p>
+    </section>
+
+    <section aria-labelledby="supportTitle">
+      <h2 id="supportTitle">Pay what you want, including nothing</h2>
+      <p>If Keylight helps you practise, an optional contribution helps pay for development and testing with more devices. You can choose one-time or monthly support on Ko-fi.</p>
+      <a class="support" href="https://ko-fi.com/scizers" target="_blank" rel="noopener noreferrer">Support Keylight on Ko-fi</a>
+      <p class="note">Supporting the project does not unlock features or change your download. Payments are handled by Ko-fi, outside Keylight.</p>
+    </section>
+  </main>
+  <footer>Independent and unofficial. Not affiliated with ROLI. <a href="https://github.com/scizerss/keylight-piano/blob/main/LICENSE">MIT licence</a></footer>
+  <script type="module" src="downloads.mjs"></script>
+</body>
+</html>

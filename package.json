@@ -1,7 +1,7 @@
 {
   "name": "keylight-piano",
   "productName": "Keylight",
-  "version": "0.2.4",
+  "version": "1.0.0",
   "private": true,
   "description": "Unofficial, open-source piano-learning app for the ROLI Piano M and LUMI Keys: falling notes, key lights, lessons and games, on your Mac or Windows PC",
   "license": "MIT",
@@ -17,10 +17,15 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node scripts/test-watchdog.js && node scripts/test-take-download.js && node scripts/test-package-win.js",
+    "test": "node scripts/test-watchdog.js && node scripts/test-blocksd-supervisor.js && node scripts/test-take-download.js && node scripts/test-origin-migration.js && node scripts/test-package-win.js && node scripts/test-external-links.js && node scripts/test-downloads.js && node scripts/test-diagnostics.js && node scripts/test-guided.js && node scripts/test-editor.js && node scripts/test-backup.js && node scripts/test-midi-out.js && node scripts/test-pair-midi.js && node scripts/test-airwave.js && node scripts/test-coaching.js && node scripts/test-leap.js && node scripts/test-airwave-native.js && node scripts/test-android-midi.js && node scripts/test-ios-midi.js && node scripts/test-song-licences.js && node scripts/test-course.js && node scripts/test-course-exercises.js && node scripts/test-song-tempos.js && node scripts/test-device-support.js && node scripts/test-android-release.js && node scripts/test-nav.js && node scripts/test-support-reminder.js && node scripts/test-mpe-zones.js && node scripts/test-jam-engine.js && node scripts/test-jam-clock.js && node scripts/test-jam-parse.js && node scripts/test-jam-midi.js && node scripts/test-jam-session.js && node scripts/test-practice.js",
+    "test:audio": "node scripts/test-sampler.js && node scripts/test-jam-audio.js",
     "selftest": "node scripts/selftest.js",
     "package": "scripts/package.sh",
-    "package:win": "node scripts/package-win.js"
+    "package:win": "node scripts/package-win.js",
+    "package:dmg": "zsh scripts/package-dmg.sh",
+    "package:installer": "node scripts/package-installer.js",
+    "package:android": "bash scripts/package-android.sh",
+    "inspect:installer": "node scripts/test-installer.js"
   },
   "engines": {
     "node": ">=22.12"

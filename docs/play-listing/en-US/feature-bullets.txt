@@ -1,0 +1,8 @@
+Free, open source (MIT) and ad-free
+Works offline: no account, no tracking
+USB and Bluetooth MIDI keyboards
+Keys light up on compatible light-up MIDI keyboards
+Falling notes, sheet music, finger numbers
+Lesson course, note games and a Playground
+Slow down, loop and practise one hand at a time
+Import MIDI and MusicXML files; record your playing

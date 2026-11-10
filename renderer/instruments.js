@@ -4,7 +4,9 @@
 //   pressure (channel pressure / poly aftertouch) -> loudness + brightness
 //   slide    (CC74)                                -> timbre (filter / harmonics)
 //   bend     (pitch wheel, per channel)            -> glide, and vibrato when wiggled
-// Instruments are synthesised locally: no licensed sample libraries.
+// Built-in instruments are synthesised locally; the optional sampled piano uses
+// Alexander Holm's Salamander samples (CC BY 3.0; see LICENSES/piano-samples.md).
+import { SampleVoice, loadPiano } from './sampler.js'
 //
 // A key press builds its voice from as few audio nodes as possible: every node is
 // work for the audio thread, and the whole voice is built while the key waits. Each
@@ -15,7 +17,14 @@
 
 export const INSTRUMENTS = [
   { id: 'grand', name: 'Grand Piano', short: 'Piano' },
+  { id: 'sampled-piano', name: 'Salamander Piano (sampled)', short: 'Sampled', sampled: true },
   { id: 'epiano', name: 'Electric Piano', short: 'E.Piano' },
+  { id: 'tine', name: 'Tine Electric Piano', short: 'Tine' },
+  { id: 'organ', name: 'Drawbar Organ', short: 'Organ' },
+  { id: 'harpsichord', name: 'Harpsichord', short: 'Harpsi' },
+  { id: 'marimba', name: 'Marimba', short: 'Marimba' },
+  { id: 'nylon', name: 'Nylon Guitar', short: 'Nylon' },
+  { id: 'warm-pad', name: 'Warm Analogue Pad', short: 'Warm Pad' },
   { id: 'flute', name: 'Flute', short: 'Flute' },
   { id: 'cello', name: 'Cello', short: 'Cello' },
   { id: 'strings', name: 'String Ensemble', short: 'Strings' },
@@ -51,6 +60,12 @@ const SHAPES = {
     bright: 7000, brightPerHz: 20, velBright: 0.55, dark: 1000, darkPerHz: 3.5, darkTau: 0.8, hammer: 0.4
   },
   epiano: { level: 0.785, attack: 0.003, body: 0.55, bodyTau: 0.3, ring: 7, release: 0.28, bright: 5000, dark: 2000 },
+  tine: { level: 0.85, attack: 0.002, body: 0.65, bodyTau: 0.22, ring: 8, release: 0.3, bright: 8000, dark: 2400, fmRatio: 7, fmPeak: 0.65, fmBody: 0.035, fmTau: 0.18 },
+  organ: { level: 0.75, attack: 0.005, onset: 1, swellTau: 0.03, release: 0.09, swell: 0.25, cutoff: 6500 },
+  harpsichord: { level: 0.8, attack: 0.001, body: 0.42, bodyTau: 0.09, ring: 4, release: 0.12, bright: 11000, dark: 3200, darkTau: 0.3 },
+  marimba: { level: 1, attack: 0.002, body: 0.48, bodyTau: 0.1, ring: 3.5, release: 0.22, bright: 6500, dark: 1600, darkTau: 0.15 },
+  nylon: { level: 0.95, attack: 0.003, body: 0.5, bodyTau: 0.16, ring: 5.5, release: 0.18, bright: 4200, dark: 1100, darkTau: 0.22 },
+  'warm-pad': { level: 1.25, attack: 0.025, onset: 0.4, swellTau: 0.35, release: 0.85, swell: 0.5, cutoff: 2200 },
   bass: { level: 0.92, attack: 0.004, body: 0.6, bodyTau: 0.25, ring: 5, release: 0.14, bright: 2600, dark: 900 },
   flute: { level: 0.6, attack: 0.006, onset: 0.8, swellTau: 0.06, release: 0.15, swell: 0.5 },
   cello: { level: 0.71, attack: 0.008, onset: 0.75, swellTau: 0.08, release: 0.25, swell: 0.6 },
@@ -100,6 +115,15 @@ const withSub = (n, sub, shape) => partials(2 * n, (k) => (k === 1 ? sub : k % 2
 // a real lift of the strings' 2nd (the old extra sine half-cancelled the saw's own).
 const LAYERS = {
   epiano: (ctx) => ({ tone: makeWave(ctx, [1, 0.25]) }),
+  tine: (ctx) => ({ tone: makeWave(ctx, [1, 0.08, 0.03]) }),
+  organ: (ctx) => ({ tone: makeWave(ctx, withSub(8, 0.35, (k) => [0.8, 0.3, 0.18, 0.1, 0, 0.06, 0, 0.04][k - 1])) }),
+  harpsichord: (ctx) => ({ tone: makeWave(ctx, partials(48, (k) => 0.7 * SAW(k) * (k % 3 ? 1 : 0.4))) }),
+  marimba: (ctx) => ({ tone: makeWave(ctx, [0.9, 0, 0.06]), overtone: makeWave(ctx, [0.25]) }),
+  nylon: (ctx) => ({ tone: makeWave(ctx, [0.85, 0.32, 0.18, 0.06, 0.035, 0.02]) }),
+  'warm-pad': (ctx) => ({
+    mid: makeWave(ctx, partials(32, (k) => 0.4 * TRIANGLE(k) + 0.12 * SAW(k))),
+    side: makeWave(ctx, partials(32, (k) => 0.18 * SAW(k)))
+  }),
   flute: (ctx) => ({ tone: makeWave(ctx, [0.9, 0.12, 0.04]) }),
   cello: (ctx) => ({
     low: makeWave(ctx, withSub(64, 0.3, (k) => 0.55 * SAW(k))),
@@ -248,6 +272,7 @@ function breathNoise(ctx) {
 
 // Build an instrument's waves and samples on `ctx` now, ahead of its first note.
 export function prepareInstrument(ctx, id) {
+  if (id === 'sampled-piano') return loadPiano(ctx)
   if (id === 'grand') {
     for (let p = 24; p <= 108; p += 12) pianoWaves(ctx, p)
     hammerSamples(ctx)
@@ -259,6 +284,7 @@ export function prepareInstrument(ctx, id) {
 
 export class Voice {
   constructor(ctx, out, pitch, velocity, instrumentId = 'grand', bendRange = 48, when = null) {
+    if (instrumentId === 'sampled-piano') return new SampleVoice(ctx, out, { pitch, velocity, bendRange, when })
     this.ctx = ctx
     this.pitch = pitch
     this.velocity = Math.max(0.05, Math.min(1, velocity / 127))
@@ -320,15 +346,27 @@ export class Voice {
       const w = pianoWaves(ctx, this.pitch)
       this._ensemble(w.center, f, w.side, UNISON[0], UNISON[1])
       this._hammer()
-    } else if (id === 'epiano') {
+    } else if (id === 'epiano' || id === 'tine') {
       const carrier = this._osc(layers(ctx, id).tone, f, 0, this.filter)
       // FM tine: the modulator wobbles the carrier's frequency, strongly at the
       // strike and gently after, which gives the bell-like attack (see _envelope)
-      const mod = new OscillatorNode(ctx, { frequency: f * 3.01 })
+      const mod = new OscillatorNode(ctx, { frequency: f * (this.shape.fmRatio || 3.01) })
       this.fm = new GainNode(ctx, { gain: 0 })
       mod.connect(this.fm).connect(carrier.frequency)
       this.oscillators.push(mod)
       this.detunes.push(0)
+    } else if (id === 'organ' || id === 'harpsichord' || id === 'nylon') {
+      this._osc(layers(ctx, id).tone, id === 'organ' ? f / 2 : f, 0, this.filter)
+    } else if (id === 'marimba') {
+      const w = layers(ctx, id)
+      this._osc(w.tone, f, 0, this.filter)
+      // A wooden bar's first overtone sits two octaves up and fades before its body.
+      this.barTone = new GainNode(ctx)
+      this._osc(w.overtone, f * 4.01, 0, this.barTone)
+      this.barTone.connect(this.filter)
+    } else if (id === 'warm-pad') {
+      const w = layers(ctx, id)
+      this._ensemble(w.mid, f, w.side, -7, 7)
     } else if (id === 'flute') {
       this._osc(layers(ctx, id).tone, f, 0, this.filter)
       // breath: noise through a band-pass that follows the pitch (and pressure)
@@ -393,14 +431,15 @@ export class Voice {
       this.filter.frequency.setValueAtTime(this._tone(), t)
     }
     if (this.fm) {
-      this.fm.gain.setValueAtTime(this.freq * 1.2, t)
-      this.fm.gain.setTargetAtTime(this.freq * 0.15, t, 0.25)
+      this.fm.gain.setValueAtTime(this.freq * (sh.fmPeak || 1.2), t)
+      this.fm.gain.setTargetAtTime(this.freq * (sh.fmBody || 0.15), t, sh.fmTau || 0.25)
     }
+    if (this.barTone) this.barTone.gain.setTargetAtTime(0, t + sh.attack, 0.065)
   }
 
   // filter cutoff for held instruments: slide (CC74) shapes the timbre, pressure opens it
   _tone() {
-    return Math.min(16000, 4000 * (0.6 + 0.8 * this.slide) * (1 + 0.8 * this.pressure))
+    return Math.min(16000, (this.shape.cutoff || 4000) * (0.6 + 0.8 * this.slide) * (1 + 0.8 * this.pressure))
   }
 
   // Pressure (aftertouch) only ever adds. Struck instruments ignore it, as a real

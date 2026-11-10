@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an idea for a lesson, game, view, sound or workflow.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Keylight is a learning app for these keyboards, not a DAW,
+        so not every request will fit — but a clear description of the problem you are
+        trying to solve is always welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+      placeholder: I want to practise a short section over and over without setting the loop by hand every time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How could Keylight solve this? Rough ideas are fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways you have tried or considered, including workarounds that exist today.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to help?
+      options:
+        - label: I would be willing to help build or test this.
+          required: false

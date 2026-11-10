@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Keylight</string>
+    <string name="update_webview">Update Android System WebView to use Keylight\'s secure native bridge.</string>
+</resources>

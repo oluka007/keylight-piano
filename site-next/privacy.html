@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keylight privacy</title>
+<meta name="description" content="What Keylight keeps on your device, what goes online and when, how the camera and device reports work, and what this website does.">
+<meta name="theme-color" content="#070818">
+<link rel="canonical" href="https://keylightpiano.app/privacy">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="privacy.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <a class="brand" href="index.html" aria-label="Keylight, back to the site">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="4" width="6" height="20" rx="2"/><rect x="11" y="4" width="6" height="20" rx="2" class="lit"/><rect x="20" y="4" width="6" height="20" rx="2"/></svg>
+    Keylight
+  </a>
+  <nav aria-label="Sections">
+    <a href="index.html">Back to the site</a>
+  </nav>
+  <a class="tip" href="https://ko-fi.com/scizers" rel="noopener"><span aria-hidden="true">&#9829;</span> Support</a>
+  <a class="btn btn-small" href="index.html#download">Download</a>
+</header>
+
+<main id="main">
+  <div class="wrap">
+    <div class="privacy-head">
+      <h1>Privacy</h1>
+      <p>Keylight collects nothing about you.</p>
+    </div>
+  </div>
+
+  <div class="privacy-wrap">
+    <section id="what-stays-on-your-device">
+      <h2>What stays on your device</h2>
+      <p>Your settings, your practice progress, your imported songs and your recordings are saved only in the app's private storage on your device. On Android they are not backed up to the cloud, and uninstalling Keylight deletes them. The app has no server of its own.</p>
+      <p>There is no account and no sign-in. There are no ads, no analytics, no crash reporting and no tracking code, and no third-party SDK that collects data. Your songs, recordings, progress and settings are not uploaded anywhere.</p>
+      <p>When you import a song, a recording or a score, Keylight reads that file through the system file picker. It is converted on your device and stays there.</p>
+    </section>
+
+    <section id="what-goes-online-and-when">
+      <h2>What goes online and when</h2>
+      <p>The desktop app for Mac and Windows has one optional feature that goes online. When you import a recording and leave "Look up cover art and lyrics" switched on, Keylight sends the song title and artist, and the length of the track, to two public services:</p>
+      <ul>
+        <li><b>itunes.apple.com</b>, Apple's public search service, for cover art. Apple's privacy policy applies.</li>
+        <li><b>lrclib.net</b>, LRCLIB, an open lyrics database, for lyrics. LRCLIB's policy applies.</li>
+      </ul>
+      <p>Nothing else is sent. This happens only while you import, and only if the option is on.</p>
+      <p>The Android app has no internet permission, so it cannot connect to a server. It shows its screens from files inside the app, and its web view is set to block connections to other sites. The only time it leaves the app is when you tap a link, such as the project page or the optional Ko-fi support page: the link opens in your browser, where that site's own privacy policy applies.</p>
+    </section>
+
+    <section id="camera">
+      <h2>Camera</h2>
+      <p>The camera is optional. It is used only for the hand-tracking preview, and only after you switch it on and allow it. You can say no and use everything else.</p>
+      <p>Video frames are analysed on your device and are never saved, recorded or uploaded. The camera is asked for only when you press Start camera, under Settings &#8250; Hand tracking.</p>
+    </section>
+
+    <section id="reporting-a-device">
+      <h2>Reporting a device</h2>
+      <p>Settings has a Support my device tool, for keyboards that are missing, unlit or only half working. It builds a plain-text report about your keyboard: its MIDI ports, how the keyboard identifies itself, and a short key test with statistics only.</p>
+      <p>Nothing is sent automatically. The report leaves your device only if you copy it, save it, or attach it to a GitHub issue yourself.</p>
+      <p>It never includes serial numbers, file paths, user names, song titles, recordings, your progress, or the notes you played.</p>
+    </section>
+
+    <section id="backups">
+      <h2>Backups</h2>
+      <p>Settings &#8250; Progress saves your library, your settings and your progress to one .keylightbackup file, which you can restore later or on another computer. Keylight also keeps the last three daily automatic backups.</p>
+      <p>Keylight does not upload the backup file. Where it goes is up to you. On Android, the app's own data is not backed up to the cloud.</p>
+    </section>
+
+    <section id="this-website">
+      <h2>This website</h2>
+      <p>This site is a set of plain files. It sets no cookies, has no analytics, and loads no third-party scripts or fonts. The videos and images come from this site.</p>
+      <p>The main page asks GitHub's public release API for the newest release, so your browser contacts api.github.com when the page loads. If that request fails, the download buttons open the releases page on GitHub.</p>
+      <p>This privacy page runs no JavaScript and loads nothing from other sites. Apart from the request to api.github.com, the pages on this site make no requests to other sites.</p>
+    </section>
+
+    <section id="support">
+      <h2>Support</h2>
+      <p>You can leave a tip at <a href="https://ko-fi.com/scizers" rel="noopener">ko-fi.com/scizers</a>. The link opens Ko-fi in your browser. Keylight does not see your payment details or whether you donated, and Ko-fi's own privacy policy applies.</p>
+    </section>
+
+    <section id="questions">
+      <h2>Questions</h2>
+      <p>For a question about privacy, or a request about data, open an issue at <a href="https://github.com/scizerss/keylight-piano/issues" rel="noopener">github.com/scizerss/keylight-piano/issues</a>.</p>
+      <p>The source code is public at <a href="https://github.com/scizerss/keylight-piano" rel="noopener">github.com/scizerss/keylight-piano</a>, so you can check every statement on this page.</p>
+    </section>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Keylight is an unofficial community project. It is not affiliated with or endorsed by ROLI. LUMI and ROLI are trademarks of their owner.</p>
+    <p>Free software under the MIT licence.</p>
+  </div>
+</footer>
+
+</body>
+</html>

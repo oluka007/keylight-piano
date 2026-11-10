@@ -1,0 +1,75 @@
+/* Note correction dialog (editor.js). Uses the tokens in style.css :root; the head and
+   the Save bar stay put while the notes scroll between them. */
+.ed {
+  width: min(780px, 94vw); max-height: 90vh; padding: 0; border: 0; overflow: hidden;
+  background: var(--surface); color: var(--text); border-radius: var(--radius-lg);
+  box-shadow: 0 30px 80px var(--shadow), inset 0 1px 0 var(--highlight);
+  user-select: text;
+}
+.ed[open] { display: flex; animation: riseIn .4s var(--ease-out) both; }
+.ed::backdrop { background: var(--scrim); }
+.ed-form { display: flex; flex-direction: column; min-height: 0; width: 100%; max-height: 90vh; }
+
+.ed-head { padding: 24px 28px 16px; box-shadow: inset 0 -1px 0 var(--line); }
+.ed-head h2 { margin: 0 0 4px; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+.ed-sub { margin: 0 0 16px; color: var(--muted); line-height: 1.45; }
+.ed-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.ed-tools .ed-tempo { flex: 1 1 200px; max-width: 240px; }
+.ed-tool { height: 44px; padding: 0 18px; }
+.ed-tool:disabled { opacity: .4; cursor: default; background: none; border-color: var(--outline); transform: none; }
+
+.ed-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 28px 16px; }
+.ed-rows { list-style: none; margin: 0; padding: 0; }
+.ed-row {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; padding: 12px 0;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.ed-num { flex: 0 0 36px; padding-top: 30px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.ed-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ed-field > span:first-child { font-size: 14px; color: var(--muted); }
+.ed-row .ed-field { flex: 1 1 84px; }
+.ed-row .ed-pitch { flex-basis: 72px; }
+.ed-row .ed-hand, .ed-row .ed-finger { flex-basis: 88px; }
+.ed-input {
+  height: 44px; width: 100%; min-width: 0; padding: 0 10px; border-radius: var(--radius-sm);
+  background: var(--list); border: 1px solid var(--line-strong); color: var(--text);
+  font-size: 15px; font-variant-numeric: tabular-nums; caret-color: var(--accent-hi);
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+select.ed-input { cursor: pointer; }
+select.ed-input option { background: var(--list); color: var(--text); }
+.ed-input:hover { border-color: var(--outline); }
+.ed-input:focus-visible { outline: 0; border-color: var(--accent-hi); box-shadow: var(--focus-ring); }
+.ed-input[aria-invalid="true"] { border-color: var(--alert-text); }
+.ed-err { min-height: 0; font-size: 13px; line-height: 1.35; color: var(--alert-text); }
+.ed-err:empty { display: none; }
+.ed-remove { margin-top: 22px; }
+.ed-remove svg { width: 16px; height: 16px; }
+.ed-empty { padding: 24px 0; color: var(--muted); }
+.ed-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 16px; }
+.ed-pager[hidden] { display: none; }
+.ed-range { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.ed-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 14px 28px 20px; box-shadow: inset 0 1px 0 var(--line);
+}
+.ed-status { flex: 1 1 200px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.ed-status:empty { display: none; }
+.ed-save { min-width: 120px; }
+.ed-save:disabled { opacity: .6; cursor: progress; }
+
+@media (max-width: 520px) {
+  .ed { width: 100vw; max-width: 100vw; max-height: 100dvh; border-radius: 0; }
+  .ed-form { max-height: 100dvh; }
+  .ed-head, .ed-body, .ed-foot { padding-left: 16px; padding-right: 16px; }
+  .ed-head h2 { font-size: 22px; }
+  .ed-num { flex-basis: 100%; padding-top: 0; text-align: left; }
+  .ed-row .ed-field { flex-basis: calc(50% - 30px); }
+  .ed-foot .ghost, .ed-foot .primary { flex: 1 1 0; }
+  .ed-status { flex-basis: 100%; }
+  .ed-input { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ed[open] { animation: fadeIn .2s both; }
+}

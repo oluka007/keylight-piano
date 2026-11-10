@@ -1,0 +1,26 @@
+Keylight turns your tablet and your MIDI keyboard into a piano teacher that never asks for money. It is free, open source and works fully offline: no account, no ads, no tracking, no subscription.
+
+Plug in a USB or Bluetooth MIDI keyboard, pick a song or lesson, and watch the notes fall toward the keys. On compatible light-up MIDI keyboards the real keys glow with the next note to play, so you can learn by looking at your hands instead of the screen. Other MIDI keyboards work too, just without the key lights.
+
+WHAT YOU CAN DO
+- Follow a step-by-step course from first notes to real pieces, with short exercises.
+- Play along with falling notes in four note views, or switch to sheet music.
+- Learn at your own speed: slow a song down, loop a hard bar, practise one hand at a time.
+- Get finger numbers for both hands.
+- Try note games and a free-play Playground with a built-in sampled grand piano.
+- Open your own MIDI and MusicXML files and turn recordings into notes on your device.
+- Record what you play and listen back.
+- Optional finger tracking with the camera, processed on your device only.
+
+BUILT FOR PRIVACY AND FREEDOM
+- Free, with no in-app purchases and no ads.
+- Works without an internet connection.
+- Your songs, recordings and progress never leave your device.
+- Open source under the MIT licence: read it, change it, share it.
+
+KEYBOARDS
+- USB MIDI keyboards (USB OTG adapter or cable and a tablet that can power the keyboard, or a powered hub).
+- Bluetooth LE MIDI keyboards.
+- Light-up MIDI keyboards with note lights are supported in compatible models; the 24-key and 49-key sizes are covered. If yours does not light up yet, open "Support my device" in Settings and share the report on the project page.
+
+Made by one developer and a small community of piano learners. Questions, ideas and bug reports are welcome on the project page on GitHub.

@@ -1,0 +1,39 @@
+/* Keylight privacy. Loaded after style.css and reuses its colours and faces.
+   No JavaScript, no motion: a calm reading page. */
+
+/* ---------- page title ---------- */
+.privacy-head { padding: 132px 0 34px; border-bottom: 1px solid var(--line); }
+.privacy-head h1 { font-family: var(--serif); font-weight: 500; letter-spacing: -.02em; line-height: 1.04; font-size: clamp(2.4rem, 6vw, 3.8rem); }
+.privacy-head p { margin-top: 16px; color: var(--dim); font-size: 1.05rem; max-width: 46rem; }
+
+/* ---------- one reading column ---------- */
+.privacy-wrap { width: min(46rem, 100% - 40px); margin-inline: auto; padding: 44px 0 100px; font-size: 1.05rem; line-height: 1.7; }
+.privacy-wrap section + section { margin-top: 3.4rem; }
+.privacy-wrap h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(1.6rem, 2.6vw, 2.05rem); line-height: 1.15; letter-spacing: -.02em; margin: 0 0 .7em; scroll-margin-top: 112px; }
+.privacy-wrap p { margin: 0 0 1.05em; color: var(--dim); }
+.privacy-wrap ul { margin: 0 0 1.2em; padding-left: 1.2em; display: grid; gap: .5em; color: var(--dim); }
+.privacy-wrap li { padding-left: .1em; }
+.privacy-wrap li::marker { color: var(--mint); }
+.privacy-wrap b { font-weight: 600; color: var(--ink); }
+.privacy-wrap a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: rgba(124, 240, 198, .55); }
+.privacy-wrap a:hover { color: var(--mint); }
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 420px) {
+  .privacy-head { padding-top: 116px; }
+  .privacy-wrap h2 { scroll-margin-top: 96px; }
+}
+
+/* ---------- print ---------- */
+@media print {
+  body { background: #fff; color: #000; }
+  .nav, .skip { display: none; }
+  .privacy-head { padding: 0 0 20px; border-bottom: 1px solid #000; }
+  .privacy-head h1, .privacy-wrap h2 { color: #000; }
+  .privacy-wrap, .privacy-head p { max-width: none; }
+  .privacy-wrap p, .privacy-wrap ul, .privacy-wrap b, .privacy-head p { color: #000; }
+  .privacy-wrap a { color: #000; text-decoration: underline; }
+  .privacy-wrap h2 { scroll-margin-top: 0; }
+  .privacy-wrap section { break-inside: avoid-page; }
+  .foot { color: #000; border-top: 1px solid #000; }
+}

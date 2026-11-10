@@ -1,0 +1,8 @@
+Play Store has no keyword field: it indexes the title, short and full description. Phrases used on purpose:
+piano lessons, learn piano, MIDI keyboard, light-up keyboard, falling notes, sheet music, USB MIDI, Bluetooth MIDI, piano games, offline, free, open source, practice, sight reading.
+Avoid: other apps' or keyboard makers' names, "best", "#1", price claims in the title, emoji in the title.
+
+Category: Music & Audio (primary). Alternative if Play suggests it: Education. Choose one application type: Apps (not Games).
+Tags (Console > Store settings, up to 5 from Play's fixed list; names change, pick the closest): music, music education, instruments / piano, learning.
+Contact email: use a project address (for example a dedicated mailbox or an alias such as keylight.piano@yourdomain, or a new project-only account), NOT a private personal address: it is shown publicly on the store page. Website: https://github.com/scizerss/keylight-piano. Privacy policy URL: see docs/PLAY-STORE.md.
+Content rating expectation: IARC "Everyone" (PEGI 3, USK 0, ESRB Everyone) with no interactive-element flags; confirm by answering the questionnaire honestly.

@@ -1,0 +1,1 @@
+First Android release. Play along with falling notes or sheet music, follow the lesson course, and connect a USB or Bluetooth MIDI keyboard. Free, offline, no ads. Tell us what works and what does not on the project page.

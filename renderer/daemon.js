@@ -7,7 +7,21 @@
 // The device UID is a 64-bit integer, which JavaScript cannot represent exactly -
 // so the UID is kept as raw decimal text and spliced into the JSON by hand.
 
-const WS_URL = 'ws://127.0.0.1:9010/ws'
+// The packaged Mac app starts its own blocksd on a random loopback port and passes it as
+// ?daemonPort=N; otherwise (a blocksd installed by hand, a development checkout) it is 9010.
+export function daemonPort(search = typeof location !== 'undefined' ? location.search : '') {
+  const n = Number(new URLSearchParams(search).get('daemonPort'))
+  return Number.isInteger(n) && n >= 1024 && n <= 65535 ? n : 9010
+}
+// True when the app carries its own light service (the packaged Mac app)
+export function bundledDaemon(search = typeof location !== 'undefined' ? location.search : '') {
+  return new URLSearchParams(search).get('bundledDaemon') === '1'
+}
+// The service's state when the page loaded: starting | ready | failed | external
+export function daemonStart(search = typeof location !== 'undefined' ? location.search : '') {
+  const v = new URLSearchParams(search).get('daemonStart')
+  return ['starting', 'ready', 'failed', 'external'].includes(v) ? v : 'starting'
+}
 const KEY_COUNT = 24
 const INFO_ID = 'lumi-app-info'      // the battery check's discover (the level only comes with one)
 const INFO_MS = 60000
@@ -42,18 +56,20 @@ export class LedDaemon {
     this.rejects = 0
     this.lastSig = ''      // the last frame asked for, so unchanged frames can be skipped
     this.infoTimer = null
+    this.port = daemonPort()
   }
 
   get ready() { return !!(this.ws && this.boards.length) }
   get count() { return this.boards.length }
   get uidText() { return this.boards.length ? this.boards[0].uidText : null }
   get device() { return this.boards.length ? this.boards[0].device : null }   // deviceInfo() of the first keyboard
+  get devices() { return this.boards.map((b) => b.device).filter(Boolean) }   // deviceInfo() of every keyboard
 
   connect() {
     this.closed = false
     if (this.ws) return
     let ws
-    try { ws = new WebSocket(WS_URL) } catch (e) { this.onStatus('unavailable', e.message); this.scheduleReconnect(); return }
+    try { ws = new WebSocket(`ws://127.0.0.1:${this.port}/ws`) } catch (e) { this.onStatus('unavailable', e.message); this.scheduleReconnect(); return }
     this.ws = ws
     ws.onopen = () => {
       // device events arrive even before a keyboard is found, so a late keyboard is picked up
@@ -72,6 +88,21 @@ export class LedDaemon {
       this.scheduleReconnect()
     }
     ws.onerror = () => {}
+  }
+
+  // The service moved to another port (the app restarted it, or found another one): reconnect there
+  setPort(port) {
+    if (!Number.isInteger(port) || port === this.port) return
+    this.port = port
+    if (this.ws) { try { this.ws.close() } catch (_e) {} }
+    this.retry()
+  }
+
+  // "Try again": look now instead of at the next 2 s retry
+  retry() {
+    this.closed = false
+    if (this.ws && this.ws.readyState === 1) this.discover()
+    else { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.connect() }
   }
 
   discover() {
@@ -160,7 +191,7 @@ export class LedDaemon {
         this.lastSig = ''
         if (msg.device) {
           known.device = deviceInfo(msg.device)
-          if (known === this.boards[0]) this.onStatus('info', known.device)
+          this.onStatus('info', this.device)
         }
       }
     } else if (msg.type === 'device_removed') {

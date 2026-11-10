@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keylight: follow the light</title>
+<meta name="description" content="Keylight is a free, open-source piano-learning app for light-up keyboards. Notes fall, your keys glow, and the song waits for you. Add any song, even an MP3. For Mac, Windows and Android.">
+<meta name="theme-color" content="#070818">
+<meta property="og:title" content="Keylight: follow the light">
+<meta property="og:description" content="A free, open-source piano teacher for light-up keyboards. Mac, Windows and Android.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://keylightpiano.app/">
+<meta property="og:image" content="https://keylightpiano.app/video/wait.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://keylightpiano.app/">
+<script>document.documentElement.className = 'js'</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <a class="brand" href="#top" aria-label="Keylight, back to top">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="4" width="6" height="20" rx="2"/><rect x="11" y="4" width="6" height="20" rx="2" class="lit"/><rect x="20" y="4" width="6" height="20" rx="2"/></svg>
+    Keylight
+  </a>
+  <nav aria-label="Sections">
+    <a href="#how">How it works</a>
+    <a href="#songs">Add songs</a>
+    <a href="#course">Learn</a>
+    <a href="#labs">Labs</a>
+    <a href="guide.html">Guide</a>
+  </nav>
+  <a class="tip" href="https://ko-fi.com/scizers" rel="noopener"><span aria-hidden="true">&#9829;</span> Support</a>
+  <a class="btn btn-small" href="#download">Download</a>
+</header>
+
+<main id="main">
+
+<section class="hero" id="top">
+  <div class="aurora" aria-hidden="true"></div>
+  <p class="eyebrow rise">Free and open source · Mac, Windows and Android</p>
+  <h1 class="rise" style="--d:.08s">Follow the light.</h1>
+  <p class="lede rise" style="--d:.16s">Keylight turns a light-up keyboard into a piano teacher. Notes fall, your keys glow, and the song waits for you.</p>
+  <div class="cta rise" style="--d:.24s">
+    <a class="btn" href="#download">Download Keylight</a>
+    <a class="btn btn-ghost" href="#try">Play a tune right here</a>
+  </div>
+  <div class="stage-wrap rise" style="--d:.32s">
+    <canvas class="stage" id="heroStage" role="img" aria-label="Glowing notes fall onto a piano keyboard and each key lights up as its note lands"></canvas>
+  </div>
+</section>
+
+<section class="scene" id="how" aria-labelledby="howTitle">
+  <div class="scene-pin">
+    <h2 class="sr" id="howTitle">How it works</h2>
+    <div class="window" id="sceneWindow">
+      <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="stack" id="sceneStack">
+        <video class="on" src="video/fall.mp4" poster="video/fall.jpg" width="1280" height="788" muted loop playsinline preload="metadata" aria-label="Ode to Joy in Keylight: coloured bars fall down the stage toward a piano keyboard"></video>
+        <video src="video/wait.mp4" poster="video/wait.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="Twinkle Twinkle in wait mode: the bars stop at the keyboard until the right key is played, then sparks fly and the song moves on"></video>
+        <video src="video/result.mp4" poster="video/result.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="The result after a song: accuracy, timing, stars and the longest streak"></video>
+      </div>
+    </div>
+    <ol class="captions" id="captions">
+      <li><span>Notes fall toward your keys.</span></li>
+      <li><span>Not ready? The song waits.</span></li>
+      <li><span>Then see how you did.</span></li>
+    </ol>
+  </div>
+</section>
+
+<section class="sync" id="sync" aria-labelledby="syncTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Screen and keys, together</p>
+    <h2 class="reveal" id="syncTitle">Your keyboard lights up with the song.</h2>
+    <p class="lede reveal">Every note on screen has a key underneath it. The key starts to glow before its note lands, blue for your left hand and orange for your right, so your hands always know where to go.</p>
+    <figure class="rig reveal">
+      <div class="rig-screen"><canvas id="syncStage" role="img" aria-label="Notes fall on a screen. Below it, a light-up keyboard glows on the matching keys at the same moment: blue for the left hand, orange for the right"></canvas></div>
+      <div class="device" id="syncDevice" aria-hidden="true">
+        <div class="device-top"><i></i><i></i><i></i><span></span></div>
+        <div class="device-keys" id="syncKeys"></div>
+      </div>
+      <figcaption>An illustration of a light-up keyboard following the app.</figcaption>
+    </figure>
+    <ul class="chips chips-center reveal" aria-label="Keyboards that work with Keylight">
+      <li>LUMI Keys</li><li>ROLI Piano M</li><li>ROLI Piano, 49 keys <span class="badge beta">Beta</span></li><li>Two joined as one <span class="badge beta">Beta</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="try" id="try" aria-labelledby="tryTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">No keyboard needed for this part</p>
+    <h2 class="reveal" id="tryTitle">Play it yourself.</h2>
+    <p class="lede reveal">This is wait mode. Tap the lit key, or press <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd>. The tune goes at your pace.</p>
+    <div class="stage-wrap reveal">
+      <canvas class="stage stage-play" id="tryStage" tabindex="0" aria-label="A small piano. The next key to play is lit. Use the buttons below or the keys A to K."></canvas>
+      <div class="keys-a11y" id="tryKeys" aria-label="Piano keys"></div>
+      <p class="try-status" id="tryStatus" aria-live="polite">Tap the glowing key to begin.</p>
+    </div>
+  </div>
+</section>
+
+<section class="stats" aria-label="Keylight in numbers">
+  <div class="wrap stats-grid">
+    <div class="stat reveal"><b data-count="76">76</b><span>built-in songs</span></div>
+    <div class="stat reveal" style="--d:.08s"><b data-count="94">94</b><span>short lessons</span></div>
+    <div class="stat reveal" style="--d:.16s"><b data-count="12">12</b><span>course levels</span></div>
+    <div class="stat reveal" style="--d:.24s"><b data-count="0" data-prefix="$">$0</b><span>for ever</span></div>
+  </div>
+</section>
+
+<section class="feature songs" id="songs" aria-labelledby="songsTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Your own music</p>
+    <h2 class="reveal" id="songsTitle">Bring any song.<br>Even an MP3.</h2>
+    <p class="lede reveal">Drop a recording on the window. Keylight listens to it, writes the notes, and turns it into a lesson with the original track playing along.</p>
+    <figure class="plate plate-wide reveal"><video class="clip" src="video/import.mp4" poster="video/import.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="A recording of Amazing Grace is added in Keylight: the app listens to it and shows the notes it found"></video></figure>
+    <ol class="steps3">
+      <li class="reveal"><b>1</b><h3>Drop a file</h3><p>MP3, M4A, WAV, FLAC, AAC, OGG or AIFF, up to twenty minutes. MIDI and MusicXML files work too.</p></li>
+      <li class="reveal" style="--d:.08s"><b>2</b><h3>Keylight listens</h3><p>The notes are worked out on your computer. Your file is never uploaded. Want it easier? Keep just the melody and a bass line.</p></li>
+      <li class="reveal" style="--d:.16s"><b>3</b><h3>Play along</h3><p>The recording plays in sync and keeps its pitch when you slow it down. A wrong note? Fix it in the editor.</p></li>
+    </ol>
+    <div class="split split-rev songs-more">
+      <figure class="plate reveal"><video class="clip" src="video/imported.mp4" poster="video/imported.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="The imported recording playing as falling notes"></video></figure>
+      <div class="copy">
+        <h3 class="reveal">It becomes a song like any other.</h3>
+        <ul class="ticks reveal">
+          <li>Wait mode, half speed, loops and both hands</li>
+          <li>Cover art and lyrics, found for you on Mac and Windows</li>
+          <li>Drop a lyrics file on a song to sing along</li>
+          <li>Sheet music for MusicXML files</li>
+        </ul>
+        <p class="fineprint reveal">Works best with piano or solo recordings. Links to streaming sites are not supported.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="views" aria-labelledby="viewsTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Views</p>
+    <h2 class="reveal" id="viewsTitle">See the music your way.</h2>
+    <p class="lede reveal">One song, four looks. Pick the one that reads best to you, and change it whenever you like, in the middle of a song too.</p>
+    <div class="switcher reveal" data-switch>
+      <div class="tabs" role="tablist" aria-label="Note views">
+        <button type="button" role="tab" aria-selected="true" data-clip="view-cascade" data-note="Cascade. Notes fall in depth toward your keys, blue for the left hand and orange for the right.">Cascade</button>
+        <button type="button" role="tab" aria-selected="false" data-clip="view-rainbow" data-note="Rainbow. Every note has its own colour, on screen and on your keys.">Rainbow</button>
+        <button type="button" role="tab" aria-selected="false" data-clip="view-colornote" data-note="Colornote. The same colours, with the note's name written on each bar.">Colornote</button>
+        <button type="button" role="tab" aria-selected="false" data-clip="view-classic" data-note="Classic. A flat piano roll, straight down onto a flat keyboard.">Classic</button>
+      </div>
+      <figure class="plate"><video class="clip" src="video/view-cascade.mp4" poster="video/view-cascade.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="Ode to Joy in the selected view"></video></figure>
+      <p class="switch-note" aria-live="polite">Cascade. Notes fall in depth toward your keys, blue for the left hand and orange for the right.</p>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="hands" aria-labelledby="handsTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Hands</p>
+    <h2 class="reveal" id="handsTitle">One hand at a time. Then both.</h2>
+    <p class="lede reveal">Learn the left hand by itself, then the right, then put them together. Keylight plays the hand you are not practising.</p>
+    <div class="switcher reveal" data-switch>
+      <div class="tabs" role="tablist" aria-label="Which hand to practise">
+        <button type="button" role="tab" aria-selected="false" data-clip="hand-left" data-note="Left hand only. Just the blue notes are yours.">Left hand</button>
+        <button type="button" role="tab" aria-selected="false" data-clip="hand-right" data-note="Right hand only. Just the orange notes are yours.">Right hand</button>
+        <button type="button" role="tab" aria-selected="true" data-clip="hand-both" data-note="Both hands. The whole piece, together.">Both hands</button>
+      </div>
+      <figure class="plate"><video class="clip" src="video/hand-both.mp4" poster="video/hand-both.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="Ode to Joy with the selected hand"></video></figure>
+      <p class="switch-note" aria-live="polite">Both hands. The whole piece, together.</p>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="sheet" aria-labelledby="sheetTitle">
+  <div class="wrap split split-rev">
+    <figure class="plate reveal"><video class="clip" src="video/sheet.mp4" poster="video/sheet.jpg" width="1600" height="986" muted loop playsinline preload="none" aria-label="The same tune in the Sheet only view: notes on a staff scroll past a glowing line while the song waits for each one"></video></figure>
+    <div class="copy">
+      <p class="eyebrow reveal">Sheet music</p>
+      <h2 class="reveal" id="sheetTitle">Read it, with the lights on.</h2>
+      <p class="reveal">Switch to Sheet only and the falling notes give way to the score. The line shows where you are, the note that is due glows in the colour of its hand, and your keys still light the way.</p>
+      <ul class="ticks reveal">
+        <li>Same wait mode, speeds and loop</li>
+        <li>Show the sheet beside the falling notes, or by itself</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="course" aria-labelledby="courseTitle">
+  <div class="wrap split">
+    <div class="copy">
+      <p class="eyebrow reveal">The course</p>
+      <h2 class="reveal" id="courseTitle">From middle C to real music.</h2>
+      <p class="reveal">Twelve levels of short lessons, each ending in something to play. Go in order, or open anything you like: the course suggests, it never locks.</p>
+      <ul class="ticks reveal">
+        <li>Guided practice splits a song into phrases, one hand at a time</li>
+        <li>It brings back the bars you got wrong</li>
+        <li>Finger numbers on every note, if you want them</li>
+      </ul>
+    </div>
+    <figure class="plate tilt reveal"><video class="clip" src="video/fingers.mp4" poster="video/fingers.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="Für Elise with a finger number on every falling note"></video></figure>
+  </div>
+</section>
+
+<section class="feature" id="practice" aria-labelledby="practiceTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Practice</p>
+    <h2 class="reveal" id="practiceTitle">Train your ears, hands and eyes.</h2>
+    <div class="bento">
+      <article class="card reveal"><h3>Ear training</h3><p>Hear a note or a chord, then find it.</p><div class="viz viz-ear" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></article>
+      <article class="card reveal" style="--d:.06s"><h3>Rhythm</h3><p>Listen to the count, then tap it back in time.</p><div class="viz viz-beat" aria-hidden="true"><i></i><i></i><i></i><i></i></div></article>
+      <article class="card reveal" style="--d:.12s"><h3>Sight-reading</h3><p>Notes on the staff, one at a time, at your level.</p><div class="viz viz-staff" aria-hidden="true"><i></i></div></article>
+      <article class="card card-wide reveal" style="--d:.18s"><h3>Playground</h3><p>Any sound, any scale, no score. Light up a scale and every note you play belongs.</p><video class="clip" src="video/playground.mp4" poster="video/playground.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="The Playground playing a chord progression with the chord names shown"></video></article>
+      <article class="card card-clip reveal" style="--d:.24s"><h3>Games</h3><p>Find the key, name the note, beat your best.</p><video class="clip" src="video/quiz.mp4" poster="video/quiz.jpg" width="1280" height="788" muted loop playsinline preload="none" aria-label="A note game asking the player to find a key"></video></article>
+    </div>
+  </div>
+</section>
+
+<section class="feature jam" id="jam" aria-labelledby="jamTitle">
+  <div class="wrap split split-rev">
+    <div class="copy">
+      <p class="eyebrow reveal">Jam</p>
+      <h2 class="reveal" id="jamTitle">Build a groove, one layer at a time.</h2>
+      <p class="reveal">Start a drum loop. Add a bass line, then chords, then a lead. Lock a scale so nothing sounds wrong, and export the result as a MIDI file.</p>
+    </div>
+    <div class="grid16 reveal" id="jamGrid" role="img" aria-label="A sixteen-step drum pattern with a moving playhead"></div>
+  </div>
+</section>
+
+<section class="feature" id="more" aria-labelledby="moreTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">And the rest</p>
+    <h2 class="reveal" id="moreTitle">Small things that add up.</h2>
+    <div class="more">
+      <article class="reveal"><h3>Fifteen sounds</h3><p>Grand piano, a sampled concert grand, electric pianos, organ, harpsichord, marimba, strings and more.</p></article>
+      <article class="reveal"><h3>Expression</h3><p>Wiggle a key to bend the note. Press into it to make it swell.</p></article>
+      <article class="reveal"><h3>Record your takes</h3><p>Save a video of the falling notes and your playing, with sound.</p></article>
+      <article class="reveal"><h3>Loop and slow</h3><p>Mark the hard bar, repeat it at half speed, then bring it back up.</p></article>
+      <article class="reveal"><h3>One hand at a time</h3><p>Left, right or both. The other hand plays itself.</p></article>
+      <article class="reveal"><h3>Daily goal and streak</h3><p>Five to thirty minutes a day, with stars and badges to collect.</p></article>
+      <article class="reveal"><h3>Two keyboards as one <span class="badge beta">Beta</span></h3><p>Snap two together for four octaves.</p></article>
+      <article class="reveal"><h3>49 keys <span class="badge beta">Beta</span></h3><p>The larger ROLI Piano works too.</p></article>
+      <article class="reveal"><h3>Backups</h3><p>One file holds your songs, settings and progress. Daily copies are kept for you.</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="feature labs" id="labs" aria-labelledby="labsTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Labs</p>
+    <h2 class="reveal" id="labsTitle">Still experimenting.</h2>
+    <p class="lede reveal">These are early. They are honest about what they can do, and they get better with every report.</p>
+    <div class="labs-grid">
+      <article class="lab reveal">
+        <div class="hands" role="img" aria-label="Illustration: numbered finger badges above piano keys, blue for the left hand and orange for the right">
+          <div class="hands-keys"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <span class="fb l" style="--x:6%;--t:0s">5</span><span class="fb l" style="--x:16%;--t:.2s">4</span><span class="fb l" style="--x:26%;--t:.4s">3</span><span class="fb l" style="--x:36%;--t:.6s">2</span><span class="fb l" style="--x:45%;--t:.8s">1</span>
+          <span class="fb r" style="--x:55%;--t:1s">1</span><span class="fb r" style="--x:64%;--t:1.2s">2</span><span class="fb r" style="--x:74%;--t:1.4s">3</span><span class="fb r" style="--x:84%;--t:1.6s">4</span><span class="fb r" style="--x:94%;--t:1.8s">5</span>
+        </div>
+        <h3>Camera coach <span class="badge exp">Experimental</span></h3>
+        <p>Point a camera at the keys and Keylight shows which finger is on which note, then compares it with the suggested fingering. It never changes your score.</p>
+        <ul class="ticks">
+          <li>Runs on your computer. No video leaves it</li>
+          <li>A phone on a stand above the keys works best</li>
+        </ul>
+      </article>
+      <article class="lab reveal" style="--d:.08s">
+        <ol class="wizard" aria-label="The five steps of Support my device">
+          <li>Detect</li><li>Test</li><li>About you</li><li>Review</li><li>Send</li>
+        </ol>
+        <h3>Support my device</h3>
+        <p>Have a keyboard that stays dark or only half works? A five-step check builds a short report so support for it can be added.</p>
+        <ul class="ticks">
+          <li>Nothing is sent by itself. You read it first</li>
+          <li>No serial numbers, names, songs or notes you played</li>
+        </ul>
+      </article>
+      <article class="lab reveal" style="--d:.16s">
+        <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <h3>Airwave gestures <span class="badge exp">Experimental</span></h3>
+        <p>Raise, tilt or close a hand above the keys to shape the sound. Finger tracking from the sensor is being tested with volunteers and is not confirmed yet.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="gallery" aria-labelledby="galleryTitle">
+  <div class="wrap"><h2 class="reveal" id="galleryTitle">A closer look.</h2></div>
+  <div class="strip" tabindex="0" aria-label="Screenshots of Keylight, scroll sideways for more">
+    <figure><img loading="lazy" src="img/home.jpg" width="1920" height="1182" alt="The Home screen with today's goal, the next lesson and the course"><figcaption>Home</figcaption></figure>
+    <figure><img loading="lazy" src="img/search.jpg" width="1920" height="1182" alt="The song library"><figcaption>Songs</figcaption></figure>
+    <figure><img loading="lazy" src="video/two.jpg" width="1280" height="788" alt="The player with a four-octave keyboard made of two joined keyboards"><figcaption>Two keyboards as one</figcaption></figure>
+    <figure><img loading="lazy" src="img/course.jpg" width="1920" height="1182" alt="The course screen, a map of levels and lessons"><figcaption>The course</figcaption></figure>
+    <figure><img loading="lazy" src="img/practice.jpg" width="1920" height="1182" alt="The Practice tab with exercises as cards"><figcaption>Practice</figcaption></figure>
+    <figure><img loading="lazy" src="img/jam.jpg" width="1920" height="1182" alt="The Jam screen with tracks and loop slots"><figcaption>Jam</figcaption></figure>
+  </div>
+</section>
+
+<section class="promise" aria-labelledby="promiseTitle">
+  <div class="wrap">
+    <h2 class="sr" id="promiseTitle">What Keylight does not do</h2>
+    <p class="big reveal">No account.</p>
+    <p class="big reveal" style="--d:.1s">No subscription.</p>
+    <p class="big reveal" style="--d:.2s">No tracking.</p>
+    <p class="lede reveal" style="--d:.3s">Your songs and progress stay on your device. The code is open for anyone to read, under the MIT licence.</p>
+  </div>
+</section>
+
+<section class="feature backing" id="support" aria-labelledby="supportTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Supporting Keylight</p>
+    <h2 class="reveal" id="supportTitle">Free, and staying free.</h2>
+    <p class="lede reveal">Nothing here is locked, and nothing will be. Keylight is made by one person in spare time. If it has earned a place on your desk, a tip helps it keep moving.</p>
+    <div class="backing-grid">
+      <article class="reveal"><h3>What a tip pays for</h3><p>The tools used to build and test each release, and keyboards to add support for. More devices is the most asked-for thing, and each one has to be on a desk to get it right.</p></article>
+      <article class="reveal" style="--d:.08s"><h3>iPhone and iPad are up to you</h3><p>The app already runs on them. Putting it on the App Store needs Apple's developer membership, 99 US dollars a year. If supporters cover it, Keylight goes on the App Store. If not, it stays a version you install yourself.</p></article>
+      <article class="reveal" style="--d:.16s"><h3>Other ways to help</h3><p>Tell someone with a light-up keyboard. Send a device report if yours is not supported yet. Report what breaks. All of it counts as much as money.</p></article>
+    </div>
+    <div class="cta cta-center reveal"><a class="btn btn-warm" href="https://ko-fi.com/scizers" rel="noopener"><span aria-hidden="true">&#9829;</span>&nbsp; Leave a tip on Ko-fi</a></div>
+    <p class="fine reveal">Once or monthly, any amount. No account needed to use Keylight either way.</p>
+  </div>
+</section>
+
+<section class="feature friends" id="friends" aria-labelledby="friendsTitle">
+  <div class="wrap">
+    <p class="eyebrow reveal">Also worth a look</p>
+    <h2 class="reveal" id="friendsTitle">Other people's work that helps.</h2>
+    <a class="friend reveal" href="https://www.demix.me/GRAB/" rel="noopener">
+      <span class="friend-name">GRAB <span aria-hidden="true">&#8599;</span></span>
+      <span class="friend-by">by Sam Hocking, demix.me</span>
+      <span class="friend-text">An open configuration tool for ROLI devices that works without ROLI's own software. Its published research on the Airwave sensor helped Keylight, and it is the place to go for setting up the keyboard itself.</span>
+    </a>
+  </div>
+</section>
+
+<section class="download" id="download" aria-labelledby="dlTitle">
+  <div class="aurora aurora-low" aria-hidden="true"></div>
+  <div class="wrap">
+    <h2 class="reveal" id="dlTitle">Your keys are waiting.</h2>
+    <p class="lede reveal">Works with ROLI light-up keyboards. Support for more devices is on the way.</p>
+    <div class="cta reveal">
+      <a class="btn" data-dl="mac" href="https://github.com/scizerss/keylight-piano/releases/latest">Download for Mac</a>
+      <a class="btn" data-dl="win" href="https://github.com/scizerss/keylight-piano/releases/latest">Download for Windows</a>
+      <a class="btn" data-dl="android" href="https://github.com/scizerss/keylight-piano/releases/latest">Get it for Android</a>
+    </div>
+    <p class="fine reveal" id="dlVersion" aria-live="polite">Mac: a disk image. Windows: an installer. Android: an APK file you open on your phone.</p>
+    <p class="fine reveal">Windows and Android are in beta. They are built and tested automatically, but not yet on many real devices. If something is wrong, <a href="https://github.com/scizerss/keylight-piano/issues" rel="noopener">tell us</a> and it gets fixed.</p>
+    <p class="soon reveal"><span>Coming soon</span> iPhone and iPad, on the App Store <a href="#support">if supporters cover Apple's yearly fee</a></p>
+    <p class="fine reveal"><a href="guide.html">Read the guide</a> · <a href="https://github.com/scizerss/keylight-piano">View the source</a> · <a href="https://ko-fi.com/scizers" rel="noopener">Leave a tip</a></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Keylight is an unofficial community project. It is not affiliated with or endorsed by ROLI. LUMI and ROLI are trademarks of their owner.</p>
+    <p>Free software under the MIT licence. <a href="privacy.html">Privacy</a></p>
+  </div>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>

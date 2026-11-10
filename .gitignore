@@ -10,3 +10,8 @@ assets/icon.icns
 # installed by npm install / npm ci
 node_modules/
 __pycache__/
+native/build/
+
+# tool state
+.omc/
+.omo/

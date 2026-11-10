@@ -1,0 +1,36 @@
+name: Question
+description: Ask how to do something, or how Keylight works.
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For "how do I…?" questions. The [user guide](https://github.com/scizerss/keylight-piano/blob/main/docs/GUIDE.md)
+        and the [reference](https://github.com/scizerss/keylight-piano/blob/main/docs/REFERENCE.md)
+        answer many of them already, and are worth a quick look first.
+
+        This is for questions. If something is *broken*, please use the Bug report
+        form; if a *keyboard* is not working, use the Device support form.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What would you like to know?
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        It helps to say what you have already tried, and what you are running Keylight
+        on (Mac, Windows or Android), if that is relevant.
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched the existing issues and the user guide.
+          required: true

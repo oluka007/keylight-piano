@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide
+    url: https://github.com/scizerss/keylight-piano/blob/main/docs/GUIDE.md
+    about: How to install Keylight and use it, step by step.
+  - name: Support the project
+    url: https://ko-fi.com/scizers
+    about: Keylight is free. If it helps you learn, you can leave a tip on Ko-fi.

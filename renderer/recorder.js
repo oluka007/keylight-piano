@@ -81,11 +81,11 @@ export function startTake({ canvas, meta = {}, save = true, maxMs = MAX_TAKE_MS,
   let stem = takeStem(started)
   for (let s = 1; stem <= lastStem; s++) stem = takeStem(new Date(started.getTime() + s * 1000))
   lastStem = stem
-  let video = null, audio = null, recorder = null
+  let video = null, audio = null, recorder = null, stream = null
   try {
     video = canvas.captureStream(FPS)
     audio = recordingStream()
-    const stream = new MediaStream([...video.getVideoTracks(), ...audio.stream.getAudioTracks()])
+    stream = new MediaStream([...video.getVideoTracks(), ...audio.stream.getAudioTracks()])
     recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: VIDEO_BPS, audioBitsPerSecond: AUDIO_BPS })
   } catch (e) {
     if (video) for (const t of video.getTracks()) t.stop()
@@ -101,11 +101,36 @@ export function startTake({ canvas, meta = {}, save = true, maxMs = MAX_TAKE_MS,
     width: canvas.width, height: canvas.height,
     outputLatencyMs: Math.round((lat.base + lat.output) * 10000) / 10,
     sampleRate: audio.sampleRate,
-    meta, onStop, stopping: null, stopReason: '', timer: 0, error: ''
+    meta, onStop, stopping: null, stopReason: '', timer: 0, error: '', tried: new Set([mimeType])
   }
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) t.chunks.push(e.data) }
-  recorder.onstart = () => { t.startEventMs = Math.round((performance.now() - t.t0) * 10) / 10 }
-  recorder.onerror = (e) => { t.error = (e && e.error && e.error.message) || 'recorder error'; log('TAKE recorder error: ' + t.error); stopTake('error') }
+  // The encoder can fail to start (macOS now and then: "Encoder initialization failed"). Before
+  // anything was recorded, the take starts again on the next supported format instead of ending.
+  const bind = (r) => {
+    r.ondataavailable = (e) => { if (e.data && e.data.size) t.chunks.push(e.data) }
+    r.onstart = () => { if (t.startEventMs == null) t.startEventMs = Math.round((performance.now() - t.t0) * 10) / 10 }
+    r.onerror = (e) => {
+      t.error = (e && e.error && e.error.message) || 'recorder error'
+      log('TAKE recorder error: ' + t.error)
+      if (!t.chunks.length && !t.stopping) {
+        r.ondataavailable = r.onstart = r.onerror = null   // nothing more from the failed attempt
+        let next
+        while ((next = formats.find((f) => !t.tried.has(f) && pickMimeType(undefined, [f])))) {
+          t.tried.add(next)
+          try {
+            const again = new MediaRecorder(stream, { mimeType: next, videoBitsPerSecond: VIDEO_BPS, audioBitsPerSecond: AUDIO_BPS })
+            t.mimeType = next; t.recorder = again; t.error = ''
+            t.t0 = performance.now(); t.firstFrameMs = null; t.startEventMs = null; t.midi = []; t.midiDropped = 0   // the take starts over
+            bind(again)
+            again.start(1000)
+            log('TAKE encoder failed to start, trying ' + next)
+            return
+          } catch (_e) {}
+        }
+      }
+      stopTake('error')
+    }
+  }
+  bind(recorder)
   // a slice a second keeps the file growing in pieces instead of one block at the end
   recorder.start(1000)
   t.timer = setTimeout(() => stopTake('time limit'), maxMs)

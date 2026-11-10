@@ -1,0 +1,86 @@
+/* "Support my device" wizard: sits on the support-dialog glass, in the mint accent */
+.device-dialog { width: min(780px, calc(100vw - 32px)); padding: 28px 32px 24px; flex-direction: column; max-height: calc(100dvh - 32px); }
+.device-dialog[open] { display: flex; }
+.device-dialog h2 { margin: 2px 0 0; font-size: 30px; line-height: 1.2; }
+.device-dialog h2:focus { outline: none; }
+.ds-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ds-kicker { font-size: 11.5px; letter-spacing: .16em; color: var(--accent-hi, var(--accent)); font-weight: 600; }
+.ds-steps { list-style: none; margin: 18px 0 18px; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; }
+.ds-steps button {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px 0 6px; border-radius: 999px; cursor: pointer;
+  color: var(--muted); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); font: 600 13px/1 var(--font);
+}
+.ds-steps button i { font-style: normal; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); font-size: 12px; }
+.ds-steps button:hover { color: var(--text); background: var(--hover); }
+.ds-steps button.done i { background: rgba(124, 240, 198, 0.2); color: var(--accent-hi, var(--accent)); }
+.ds-steps button[aria-current="step"] { color: var(--ink); background: linear-gradient(180deg, var(--mint), var(--mint-2)); border-color: transparent; }
+.ds-steps button[aria-current="step"] i { background: rgba(7, 20, 43, 0.18); color: var(--ink); }
+.ds-steps button:focus-visible, .ds-check input:focus-visible, .ds-field select:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.ds-body { overflow-y: auto; min-height: 0; flex: 1 1 auto; padding: 2px 4px 2px 0; margin-right: -4px; }
+.ds-body section > p { margin: 0 0 14px; color: var(--muted); }
+.device-dialog .ds-muted { color: var(--faint); font-size: 14px; margin: 0 0 12px; }
+.device-dialog .ds-muted em { float: right; font-style: normal; font-size: 12.5px; }
+.ds-sub { margin: 20px 0 8px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.ds-toolbar { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; color: var(--muted); font-size: 14px; flex-wrap: wrap; }
+.ds-ports { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.ds-port, .ds-ident, .ds-card {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)); border: 1px solid var(--pane-line); border-radius: 16px;
+  box-shadow: var(--glass-edge);
+}
+.ds-port { padding: 12px 14px; display: grid; gap: 4px; }
+.ds-port-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.ds-port-top strong { overflow-wrap: anywhere; }
+.ds-port-meta, .ds-ident span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.ds-pill { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--muted); flex: none; }
+.ds-pill.on { background: rgba(124, 240, 198, 0.18); color: var(--accent-hi, var(--accent)); }
+.ds-ident { padding: 12px 14px; display: grid; gap: 3px; margin-bottom: 8px; }
+.ds-card { padding: 16px 18px; margin-bottom: 12px; }
+.ds-card h3 { margin: 0 0 4px; font-size: 16px; }
+.ds-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin: 0 0 10px; }
+.ds-bar i { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: linear-gradient(90deg, var(--mint-2), var(--mint)); border-radius: 3px; }
+@media (prefers-reduced-motion: no-preference) { .ds-bar i { transition: width .12s linear; } }
+.ds-result { display: grid; gap: 2px; font-size: 14px; }
+.ds-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.ds-row span { color: var(--muted); }
+.ds-field { display: grid; gap: 6px; margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+.ds-field input, .ds-field select, .ds-field textarea { font: 15px/1.4 var(--font); padding: 10px 12px; color: var(--text); width: 100%; box-sizing: border-box; }
+.ds-field select { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--pane-line); border-radius: 14px; max-width: 280px; }
+.ds-field select option { background: var(--surface); color: var(--text); }
+.ds-field textarea { resize: vertical; min-height: 90px; }
+.ds-fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.ds-fieldset legend { padding: 0; margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.ds-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.ds-fieldset > .ds-check { display: inline-flex; margin-right: 8px; }
+.ds-check { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); cursor: pointer; font-size: 14px; color: var(--text); }
+.ds-check:hover { background: var(--hover); }
+.ds-check:has(input:checked) { border-color: var(--accent-line, var(--mint-2)); background: rgba(124, 240, 198, 0.1); }
+.ds-check input { accent-color: var(--mint-2); width: 18px; height: 18px; margin: 0; }
+#dsPreview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: min(46vh, 420px); overflow: auto; margin: 0 0 10px; padding: 16px; border-radius: 16px; background: rgba(4, 6, 22, 0.7); border: 1px solid var(--pane-line); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; user-select: text; color: var(--text); }
+.ds-send { display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 16px; }
+.ds-send button { min-height: 44px; padding: 0 20px; }
+#dsSendState:empty { display: none; }
+#dsSendState { color: var(--accent-hi, var(--accent)); margin: 0; }
+.ds-actions { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); flex: none; }
+.ds-actions .ghost, .ds-actions .primary { min-height: 44px; padding: 0 20px; }
+.ds-actions form:last-child { margin-left: auto; }
+.device-card .about-actions { margin-bottom: 0; }
+#obSupportDevice { margin: 6px 0 10px; }
+@media (max-width: 700px) {
+  .device-dialog { padding: 20px 18px 16px; }
+  .device-dialog h2 { font-size: 24px; }
+  .ds-steps button { padding-right: 10px; font-size: 12px; }
+  .ds-ports, .ds-checks { grid-template-columns: 1fr; }
+  .ds-actions { flex-direction: row; }
+  .ds-actions button { width: auto; }
+  .ds-actions .primary { flex: 1; justify-content: center; }
+}
+@media (forced-colors: active) { .ds-check, .ds-port, .ds-card, #dsPreview { border: 1px solid CanvasText; } .ds-steps button[aria-current="step"] { outline: 2px solid Highlight; } }
+.device-dialog [hidden] { display: none !important; }
+.device-dialog .ds-actions { flex-direction: row; }
+.ds-usb-list { display: grid; gap: 8px; }
+.ds-usb { align-items: flex-start; padding: 10px 14px; min-height: 0; }
+.ds-usb input { margin-top: 4px; }
+.ds-usb-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ds-usb-text .ds-muted, .ds-port-stats .ds-muted { font-size: 13px; margin: 0; }
+.ds-port-stats { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); overflow-wrap: anywhere; }
+.ds-port-stats .ds-muted { font-size: 13px; }

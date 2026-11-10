@@ -22,6 +22,18 @@ export const BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7
 let vision = null
 let landmarker = null
 
+// Keep the model's handedness score (not a fingertip/contact confidence).
+export function handObservations(result, observedAt, mirror = false) {
+  return (result.landmarks || []).map((points, i) => {
+    const category = result.handedness?.[i]?.[0]
+    const label = category?.categoryName === 'Left' ? 'left' : 'right'
+    const side = mirror ? label : (label === 'left' ? 'right' : 'left')
+    const confidence = ['Left', 'Right'].includes(category?.categoryName) && Number.isFinite(category?.score)
+      ? Math.max(0, Math.min(1, category.score)) : 0
+    return { side, points, confidence, observedAt }
+  })
+}
+
 async function loadLandmarker() {
   if (landmarker) return landmarker
   vision = await import('./vendor/mediapipe/vision_bundle.mjs')
@@ -57,6 +69,7 @@ export class HandTracker {
     this.onEnded = () => {}
     this.active = true         // the app pauses detection on screens that don't use it
     this.lastSeen = 0          // when hands were last detected (performance.now)
+    this.observedAt = null     // timestamp of the latest inference, including no hands
     this._lastTs = -1
   }
 
@@ -89,6 +102,7 @@ export class HandTracker {
     if (this.stream) for (const t of this.stream.getTracks()) t.stop()
     this.stream = null
     this.hands = []
+    this.observedAt = null
   }
 
   _detect() {
@@ -97,13 +111,9 @@ export class HandTracker {
     if (ts - this._lastTs < 66) return          // ~15 detections a second is plenty
     this._lastTs = ts
     const res = landmarker.detectForVideo(this.video, ts)
-    this.hands = (res.landmarks || []).map((points, i) => {
-      // MediaPipe labels hands as seen in a mirror; a camera looking down at the
-      // keys is not mirrored, so swap unless the view is mirrored.
-      const label = res.handedness?.[i]?.[0]?.categoryName === 'Left' ? 'left' : 'right'
-      const side = this.mirror ? label : (label === 'left' ? 'right' : 'left')
-      return { side, points }
-    })
+    this.observedAt = ts
+    // MediaPipe labels a mirrored view; swap for a camera looking down at keys.
+    this.hands = handObservations(res, ts, this.mirror)
     if (this.hands.length) this.lastSeen = ts
     this.onFrame(this.hands)
   }
@@ -135,6 +145,23 @@ export class HandTracker {
       })
     }
     return out
+  }
+
+  // Coaching needs unsnapped positions and age, including stale/empty frames.
+  // Existing hover badges continue using fingertipsOverKeys unchanged.
+  getObservation() {
+    const fingertips = []
+    for (const hand of this.hands) {
+      TIPS.forEach((idx, f) => {
+        const point = hand.points[idx]
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+        const q = this.project(point)
+        if (q) fingertips.push({ ...q, side: hand.side, finger: f + 1,
+          confidence: hand.confidence, observedAt: hand.observedAt })
+      })
+    }
+    return { active: this.running && this.active, calibrated: !!this.calib,
+      observedAt: this.observedAt, fingertips }
   }
 
   // Grab the current frame as grey levels, downscaled (for calibration).

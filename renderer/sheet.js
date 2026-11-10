@@ -6,6 +6,7 @@
 // a D.C. written only as words), and the notes on screen follow musicxml.js.
 
 import { secondsAt } from './musicxml.js'
+import { COLORS } from './theme.js'
 
 const LIB_URL = 'vendor/opensheetmusicdisplay.min.js'
 const MAX_ZOOM = 1.25
@@ -15,7 +16,7 @@ const OPTIONS = {
   drawingParameters: 'compacttight', drawMetronomeMarks: false,
   drawTitle: false, drawSubtitle: false, drawComposer: false, drawLyricist: false, drawCredits: false,
   drawPartNames: false, drawPartAbbreviations: false, drawMeasureNumbers: true,
-  followCursor: false, disableCursor: true, defaultColorMusic: '#FFFFFF'
+  followCursor: false, disableCursor: true, defaultColorMusic: '#E4DFD4'
 }
 
 // A classic script: the bundle sets a global, and fails when import()ed.
@@ -43,7 +44,12 @@ function writtenPositions(osmd) {
     rows.push({
       measure: m.measureListIndex,
       quarters: (c.AbsoluteTimestamp.RealValue - m.AbsoluteTimestamp.RealValue) * 4,
-      x: Math.min(...es.map((e) => e.PositionAndShape.AbsolutePosition.x)) * px
+      x: Math.min(...es.map((e) => e.PositionAndShape.AbsolutePosition.x)) * px,
+      notes: es.flatMap((e) => e.graphicalVoiceEntries.flatMap((v) => v.notes.flatMap((n) => {
+        const pitch = n.sourceNote.Pitch
+        const head = n.notehead?.().getAttribute?.('el')
+        return pitch && head ? [{ pitch: Math.round(69 + 12 * Math.log2(pitch.Frequency / 440)), quarters: n.sourceNote.Length.RealValue * 4, head }] : []
+      })))
     })
   }
   return rows
@@ -65,7 +71,9 @@ export function playedTimeline(rows, score) {
   score.order.forEach((measure, bar) => {
     if (bar && measure !== score.order[bar - 1] + 1) jumped = true
     for (const r of byMeasure.get(measure) || []) {
-      timeline.push({ t: secondsAt(score.tempo, score.starts[bar] + r.quarters), x: r.x, jump: jumped })
+      const row = { t: secondsAt(score.tempo, score.starts[bar] + r.quarters), x: r.x, jump: jumped }
+      if (r.notes) row.notes = r.notes.map((n) => ({ ...n, end: secondsAt(score.tempo, score.starts[bar] + r.quarters + n.quarters) }))
+      timeline.push(row)
       jumped = false
     }
   })
@@ -88,6 +96,22 @@ export function timelineX(timeline, pos) {
   return a.x + (b.x - a.x) * Math.min(1, (pos - a.t) / (b.t - a.t))
 }
 
+// Match the actual sounding/waiting notes to their written heads, including repeats,
+// chords and tie continuations. The player's note hands remain the source of colour.
+export function dueSheetHeads(timeline, pos, due) {
+  const pitches = new Map(due.map((n) => [n.pitch, n.hand]))
+  const heads = new Map()
+  if (!pitches.size) return heads
+  for (const row of timeline) {
+    if (row.t > pos + 0.04) break
+    for (const n of row.notes || []) {
+      const hand = pitches.get(n.pitch)
+      if (n.end > pos && COLORS.hand[hand]) heads.set(n.head, hand)
+    }
+  }
+  return heads
+}
+
 export class SheetStrip {
   constructor(box, music) {
     this.box = box
@@ -98,12 +122,15 @@ export class SheetStrip {
     this.token = 0           // a slower render of an earlier song can't land on this one
     this.headX = 0
     this.lastX = NaN
+    this.baseHeight = 0
+    this.litHeads = new Map()
     this.onError = null
   }
 
   async show(score) {
-    if (score === this.score) return true
+    if (score === this.score) { this.place(); return true }
     const token = ++this.token
+    this.clearHighlights()
     this.score = null
     this.timeline = []
     this.lastX = NaN
@@ -123,9 +150,9 @@ export class SheetStrip {
     osmd.render()
     // fit the line to the strip's height (load() put the zoom back to 1, so it's set here)
     const svg = this.music.querySelector('svg')
-    const height = svg ? parseFloat(svg.getAttribute('height')) : 0
-    const room = this.box.clientHeight - 8
-    if (height > 0 && room > 0) { osmd.Zoom = Math.min(MAX_ZOOM, room / height); osmd.render() }
+    this.baseHeight = svg ? parseFloat(svg.getAttribute('height')) : 0
+    this.score = score
+    this.fit()
     // past OSMD's longest line it wraps, and then x no longer follows the song
     const pages = osmd.GraphicSheet.MusicPages
     if (pages && pages[0] && pages[0].MusicSystems && pages[0].MusicSystems.length > 1) throw new Error('this score is too long to show on one line')
@@ -138,20 +165,56 @@ export class SheetStrip {
 
   // Where the playhead sits follows the window's width, read here rather than every frame.
   place() {
+    this.fit()
     this.headX = Math.round(this.box.clientWidth * 0.28)
     this.box.style.setProperty('--sheet-head', this.headX + 'px')
     this.lastX = NaN
   }
 
   // A draw still under way is dropped: the strip it was measuring for has gone.
-  cancel() { this.token++ }
+  cancel() { this.token++; this.clearHighlights() }
+
+  fit() {
+    if (!this.score || !this.baseHeight || !this.osmd) return
+    const room = this.box.clientHeight - 18
+    if (!(room > 0)) return
+    const zoom = Math.min(this.box.classList.contains('sheet-only') ? 2.5 : MAX_ZOOM, room / this.baseHeight)
+    if (Math.abs(zoom - this.osmd.zoom) < 0.001) return
+    this.clearHighlights()
+    this.osmd.Zoom = zoom
+    this.osmd.render()
+    this.timeline = playedTimeline(writtenPositions(this.osmd), this.score)
+    this.lastX = NaN
+  }
+
+  clearHighlights() {
+    for (const head of this.litHeads.keys()) {
+      head.classList.remove('sheet-due')
+      delete head.dataset.sheetHand
+      head.style.removeProperty('--sheet-note-color')
+    }
+    this.litHeads.clear()
+  }
+
+  highlight(pos, due) {
+    const heads = dueSheetHeads(this.timeline, pos, due)
+    if (heads.size === this.litHeads.size && [...heads].every(([head, hand]) => this.litHeads.get(head) === hand)) return
+    this.clearHighlights()
+    for (const [head, hand] of heads) {
+      head.classList.add('sheet-due')
+      head.dataset.sheetHand = hand
+      head.style.setProperty('--sheet-note-color', COLORS.hand[hand])
+    }
+    this.litHeads = heads
+  }
 
   // Called every frame: touches the page only when the line has moved.
-  update(pos) {
+  update(pos, due = []) {
     if (!this.timeline.length) return
+    this.highlight(pos, due)
     const x = Math.round(timelineX(this.timeline, pos) * 2) / 2
     if (x === this.lastX) return
     this.lastX = x
-    this.music.style.transform = 'translate3d(' + (this.headX - x) + 'px,0,0)'
+    this.music.style.transform = 'translate3d(' + (this.headX - x) + 'px,0,0)' + (this.box.classList.contains('sheet-only') ? ' translateY(-50%)' : '')
   }
 }

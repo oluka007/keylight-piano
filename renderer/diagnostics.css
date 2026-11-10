@@ -1,0 +1,15 @@
+.diagnostics-dialog { width: min(760px, calc(100vw - 32px)); }
+.diagnostics-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.diagnostics-heading h2 { min-width: 0; }
+.diagnostics-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-deep);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  font: 14px/1.6 ui-monospace, monospace;
+  user-select: text;
+  margin: 24px 0;
+}
+.diagnostics-dialog .support-actions { margin-top: 24px; }
+@media (max-width: 600px) { .diagnostics-dialog pre { font-size: 14px; padding: 12px; } }

@@ -17,8 +17,9 @@ case ${1:-} in
   "") ;;
   *) echo "usage: scripts/package.sh [--zip-only]" >&2; exit 2 ;;
 esac
-NAME=Keylight
-BUNDLE_ID=app.keylight.desktop
+# KEYLIGHT_APP_NAME / KEYLIGHT_BUNDLE_ID name a tester build apart from the normal app
+NAME=${KEYLIGHT_APP_NAME:-Keylight}
+BUNDLE_ID=${KEYLIGHT_BUNDLE_ID:-app.keylight.desktop}
 APPS="$HOME/Applications"
 APP="$APPS/$NAME.app"
 VERSION=$(plutil -extract version raw -o - "$ROOT/package.json")
@@ -49,6 +50,25 @@ rm -f "$RES/default_app.asar" "$RES/electron.icns"
 mkdir -p "$RES/app"
 cp "$ROOT/main.js" "$ROOT/package.json" "$RES/app/"
 rsync -a --exclude '.DS_Store' "$ROOT/renderer/" "$RES/app/renderer/"
+# A tester build ("keylightBuild" in package.json) carries the Airwave tracking helper for this Mac
+HELPER_DIR="$ROOT/native/build/darwin-arm64"
+if plutil -extract keylightBuild json -o - "$ROOT/package.json" >/dev/null 2>&1; then
+  [[ -x $HELPER_DIR/keylight-leap-helper ]] || { echo "error: build the helper first (native/build.sh)" >&2; exit 1; }
+  mkdir -p "$RES/native/darwin-arm64"
+  cp "$HELPER_DIR/keylight-leap-helper" "$RES/native/darwin-arm64/"
+  cp "$ROOT/docs/AIRWAVE-TESTER-STEPS.md" "$PKG/Airwave tester steps.md"
+fi
+# The light daemon (scripts/build-blocksd.sh), so the keys light with no install step. Optional:
+# without it the app still builds, and the Mac user falls back to the manual blocksd install.
+BLOCKSD_DIR="$ROOT/native/build/darwin-arm64/blocksd"
+HAVE_BLOCKSD=0
+if [[ -x $BLOCKSD_DIR/blocksd ]]; then
+  ditto "$BLOCKSD_DIR" "$RES/blocksd"
+  rm -f "$RES/blocksd/.build-stamp"
+  HAVE_BLOCKSD=1
+else
+  echo "note: no bundled light daemon (run scripts/build-blocksd.sh first): this build lights keys only if blocksd is installed by hand" >&2
+fi
 # licence notices travel with the binary
 cp "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/LICENSE" "$RES/"
 cp -R "$ROOT/LICENSES" "$RES/"
@@ -85,6 +105,21 @@ xattr -cr "$NEW"
 # (ELECTRON_RUN_AS_NODE, NODE_OPTIONS, --inspect): with them on, anything on the Mac
 # could borrow the app's camera permission.
 node "$ROOT/scripts/flip-fuses.js" "$NEW"
+# The daemon's own Mach-O files are not in a place codesign --deep walks: sign each one,
+# inside-out (libraries and extension modules first, the main executable last), then the app.
+if (( HAVE_BLOCKSD )); then
+  MACHO=()
+  for f in "$RES"/blocksd/**/*(.N); do
+    [[ $f == */blocksd && $f == "$RES/blocksd/blocksd" ]] && continue
+    file -b "$f" | grep -q 'Mach-O' && MACHO+=("$f")
+  done
+  for f in "${MACHO[@]}"; do
+    if ! out=$(codesign --force -s - "$f" 2>&1); then print -r -- "$out" >&2; exit 1; fi
+  done
+  if ! out=$(codesign --force -s - "$RES/blocksd/blocksd" 2>&1); then print -r -- "$out" >&2; exit 1; fi
+  codesign --verify --strict "$RES/blocksd/blocksd"
+  echo "signed the light daemon (${#MACHO} libraries + executable)"
+fi
 if ! out=$(codesign --force --deep -s - "$NEW" 2>&1); then print -r -- "$out" >&2; exit 1; fi
 codesign --verify --deep --strict "$NEW"
 
@@ -104,7 +139,7 @@ ditto -x -k "$ZIP" "$STAGE/unzipped"
 codesign --verify --deep --strict "$STAGE/unzipped/$NAME-$VERSION/$NAME.app"
 ARCHS=$(file -b "$NEW/Contents/MacOS/$EXE" | grep -oE 'arm64|x86_64' | sort -u | paste -sd ' ' -)
 echo
-echo "$NAME $VERSION (Electron $ELECTRON_VERSION, macOS $MIN_MACOS+, $ARCHS), ad-hoc signed"
+echo "$NAME $VERSION (Electron $ELECTRON_VERSION, macOS $MIN_MACOS+, $ARCHS), ad-hoc signed$( (( HAVE_BLOCKSD )) && echo ', with the light daemon' )"
 echo "  zip        ${ZIP#$ROOT/} ($(du -h "$ZIP" | cut -f1 | tr -d ' '))"
 (( ZIP_ONLY )) && exit 0
 

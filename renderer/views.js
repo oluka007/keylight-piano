@@ -33,6 +33,12 @@ const PAL = {
   right: (COLORS && COLORS.hand && COLORS.hand.right) || '#FF8A3D',
   left: (COLORS && COLORS.hand && COLORS.hand.left) || '#3D8BFF'
 }
+// On the glass stage the two hands read as warm peach and cool periwinkle: the hand colours
+// from theme.js (which the key lights keep) eased towards white for the canvas only.
+const HAND_SOFT = { '#ff8a3d': '#ffa877', '#3d8bff': '#8aa6ff' }
+const softHand = (c) => HAND_SOFT[String(c).toLowerCase()] || c
+PAL.right = softHand(PAL.right)
+PAL.left = softHand(PAL.left)
 const PAL_TOKENS = {
   bgTop: '--stage-top', bgBot: '--stage-bottom', bed: '--key-bed', white: '--key-white', whiteOff: '--key-white-off',
   black: '--key-black', blackScale: '--key-black-scale', accent: '--accent', accentHi: '--accent-hi',
@@ -117,6 +123,9 @@ function tone(c) {
       hot: mix(c, '#FFFFFF', 0.5),           // flat bars: sounding now
       hotTop: mix(c, '#FFFFFF', 0.12),
       lit: mix(c, '#FFFFFF', 0.3),           // 3D bar top while it sounds
+      gloss: mix(c, '#FFFFFF', 0.3),         // glass bars: the lighter end
+      glossHot: mix(c, '#FFFFFF', 0.58),
+      glossBase: mix(c, PAL.bgTop, 0.1),
       top: mix(c, PAL.bgTop, 0.14),          // 3D bar top before it sounds: a little dimmer
       side: mix(c, '#000000', 0.48),         // 3D bar front and sides
       sideHot: mix(c, '#000000', 0.2),
@@ -694,7 +703,7 @@ export function drawScene(ctx, W, H, s) {
   const view = s.view === 'RAINBOW' || s.view === 'COLORNOTE' || s.view === 'CLASSIC' ? s.view : 'CASCADE'
   const notes = Array.isArray(s.notes) ? s.notes : []
   const freeplay = notes.length === 0 && Array.isArray(s.scale)
-  const flat = view === 'CLASSIC' && !freeplay
+  const flat = view === 'CLASSIC'
   const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
   const dpr = m && m.a > 0 ? m.a : (typeof window !== 'undefined' && window.devicePixelRatio) || 1
   layout(ctx, W, H, ws, flat, dpr)
@@ -712,7 +721,7 @@ export function drawScene(ctx, W, H, s) {
     const scaleSet = freeplay ? scaleSetOf(s.scale) : null
     const root = freeplay && s.scaleRoot != null ? pcOf(s.scaleRoot) : -1
     const sig = keyStates(freeplay, scaleSet, root)
-    if (flat) drawFrameFlat(ctx, s, W, H, view, notes, pos, wall)
+    if (flat) drawFrameFlat(ctx, s, W, H, view, notes, pos, wall, freeplay)
     else drawFrame3D(ctx, s, W, H, view, notes, freeplay, pos, wall, sig)
   } finally {
     ctx.restore()
@@ -1110,7 +1119,11 @@ function drawNote3D(ctx, n, k, pos, view, labels, meta, alpha, waitPulse) {
   ctx.fill()
   ctx.beginPath()
   notePath(ctx, xl, xr, d0, d1, M.noteH, rc, 0)
-  ctx.fillStyle = active ? tn.lit : waitPulse ? mix(color, '#FFFFFF', 0.12 + 0.34 * waitPulse) : tn.top
+  // a soft vertical sheen: lighter at the far end, the colour itself near the line
+  const sheen = ctx.createLinearGradient(0, yTop1, 0, yTop0)
+  const nearC = active ? tn.lit : waitPulse ? mix(color, '#FFFFFF', 0.12 + 0.34 * waitPulse) : tn.top
+  sheen.addColorStop(0, active ? tn.glossHot : tn.gloss); sheen.addColorStop(1, nearC)
+  ctx.fillStyle = sheen
   ctx.fill()
   ctx.strokeStyle = tn.rim
   ctx.lineWidth = active ? 1.5 : 1
@@ -1274,13 +1287,13 @@ function drawWhiteKey(g, k, fill, lit, down) {
   } else {
     // a little darker under the fallboard, a soft sheen towards the front
     gr.addColorStop(0, mix(fill, '#000000', 0.16)); gr.addColorStop(0.3, fill)
-    gr.addColorStop(0.82, mix(fill, '#FFFFFF', 0.22)); gr.addColorStop(1, mix(fill, '#FFFFFF', 0.12))
+    gr.addColorStop(0.82, mix(fill, '#FFFFFF', 0.1)); gr.addColorStop(1, mix(fill, '#FFFFFF', 0.05))
   }
   g.fillStyle = gr
   g.fill()
   // the rounded front edge catches the light
   const h = G.span / 2, x0 = k.lx0 - h + M.keyGap + M.corner, x1 = k.lx1 - h - M.keyGap - M.corner
-  g.fillStyle = lit ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.6)'
+  g.fillStyle = lit ? 'rgba(255,255,255,0.4)' : 'rgba(255,248,235,0.34)'
   g.fillRect(X3(x0, df), yf - 1, X3(x1, df) - X3(x0, df), 1)
 }
 
@@ -1434,7 +1447,7 @@ function drawKeyGlows3D(ctx, pulse) {
 }
 
 /* ========================================================== flat frame */
-function drawFrameFlat(ctx, s, W, H, view, notes, pos, wall) {
+function drawFrameFlat(ctx, s, W, H, view, notes, pos, wall, freeplay) {
   ctx.fillStyle = G.bg; ctx.fillRect(0, 0, W, H)
   const bd = backdropFor(s.backdrop, W, G.kbTop)
   if (bd) {
@@ -1451,6 +1464,7 @@ function drawFrameFlat(ctx, s, W, H, view, notes, pos, wall) {
   drawLoopMarkers(ctx, s, pos)
   drawJudgementLine(ctx)
   drawKeyboardFlat(ctx, wall)
+  if (freeplay) drawChordName(ctx, s, W, wall)
   drawWords(ctx, wall)
   drawHud(ctx, s, wall)
 }
@@ -1552,24 +1566,26 @@ function drawNote(ctx, n, k, pos, view, labels, meta, alpha, waitPulse) {
   const color = noteColor(n, view)
   const tn = tone(color)
 
+  if (active || waitPulse || alpha > 0.5) {
+    // a soft halo from a cached sprite (no blur per frame): gentle on every note, stronger when it sounds
+    const ga = active ? 0.5 : waitPulse ? 0.15 + 0.3 * waitPulse : 0.16
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    drawGlow(ctx, color, k.cx, (yt + yb) / 2, hB + 14, (yb - yt) / 2 + 14, ga * alpha)
+    ctx.restore()
+  }
   capsulePath(ctx, k.cx, hB, yt, k.cx, hB, yb)
   ctx.globalAlpha = alpha
-  if (active || waitPulse) {
-    ctx.shadowColor = color
-    ctx.shadowBlur = active ? 26 : 8 + 22 * waitPulse
-  }
   const g = ctx.createLinearGradient(0, yt, 0, yb)
-  if (active) { g.addColorStop(0, tn.hotTop); g.addColorStop(1, tn.hot) }
-  else if (waitPulse) { g.addColorStop(0, tn.base); g.addColorStop(1, mix(color, '#FFFFFF', 0.15 + 0.35 * waitPulse)) }
-  else { g.addColorStop(0, tn.deep); g.addColorStop(1, tn.lite) }
+  if (active) { g.addColorStop(0, tn.glossHot); g.addColorStop(1, tn.lit) }
+  else if (waitPulse) { g.addColorStop(0, tn.gloss); g.addColorStop(1, mix(color, '#FFFFFF', 0.12 + 0.34 * waitPulse)) }
+  else { g.addColorStop(0, tn.gloss); g.addColorStop(1, tn.glossBase) }
   ctx.fillStyle = g
   ctx.fill()
-  ctx.shadowBlur = 0
-  ctx.shadowColor = 'rgba(0,0,0,0)'
-  // crisp rim
-  ctx.globalAlpha = alpha * (active ? 0.9 : 0.55)
-  ctx.strokeStyle = active ? PAL.cream : tn.hot
-  ctx.lineWidth = active ? 1.6 : 1
+  // a hairline rim, brighter while it sounds
+  ctx.globalAlpha = alpha * (active ? 0.8 : 0.4)
+  ctx.strokeStyle = active ? tn.glossHot : tn.hot
+  ctx.lineWidth = 1
   ctx.stroke()
   ctx.globalAlpha = 1
 

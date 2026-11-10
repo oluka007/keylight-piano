@@ -1,0 +1,7 @@
+# Inputs for native/blocksd/requirements.lock (see scripts/build-blocksd.sh).
+# blocksd v0.6.0's own dependencies, plus the freezer.
+python-rtmidi==1.5.8
+typer==0.27.2
+rich==15.0.0
+pydantic==2.13.5
+pyinstaller

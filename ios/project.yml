@@ -1,0 +1,87 @@
+name: Keylight
+options:
+  bundleIdPrefix: org.keylight
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "${KEYLIGHT_VERSION}"
+    CURRENT_PROJECT_VERSION: "${KEYLIGHT_BUILD}"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  Keylight:
+    type: application
+    platform: iOS
+    sources:
+      - path: Keylight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.keylight.piano.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Keylight/Info.plist
+    info:
+      path: Keylight/Info.plist
+      properties:
+        CFBundleDisplayName: Keylight
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UIRequiresFullScreen: false
+        UIApplicationSupportsIndirectInputEvents: true
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIUserInterfaceStyle: Dark
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        NSBluetoothAlwaysUsageDescription: Keylight uses Bluetooth only to connect to your MIDI keyboard.
+        NSCameraUsageDescription: "Optional. Keylight can watch your hands with the camera to show finger positions. The video never leaves your device."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+    preBuildScripts:
+      - name: Bundle renderer
+        script: '"${SRCROOT}/scripts/bundle-renderer.sh"'
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+  KeylightTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: KeylightTests
+    dependencies:
+      - target: Keylight
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: org.keylight.piano.ios.tests
+schemes:
+  Keylight:
+    build:
+      targets:
+        Keylight: all
+        KeylightTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - KeylightTests

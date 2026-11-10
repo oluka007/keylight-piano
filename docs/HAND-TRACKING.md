@@ -31,9 +31,9 @@ Lighting: a normally lit room is enough. Avoid a bright window behind the keyboa
 
 ## How it works
 
-- Google's **MediaPipe Hand Landmarker** (Apache-2.0, runs locally on the Mac's GPU, no
-  video leaves the computer) finds 21 points per hand, up to two hands, about 30 times a
-  second.
+- Google's **MediaPipe Hand Landmarker** (Apache-2.0, runs locally, no video leaves the
+  computer) finds 21 points per hand, up to two hands. The camera requests 30 fps and
+  inference is throttled to about 15 detections per second.
 - Calibration stores where the first and last key sit in the picture. Each fingertip is
   projected onto that line to get a position along the 24 keys, then snapped to the
   nearest real key in the on-screen keyboard's own geometry (black keys only when the tip
@@ -51,9 +51,10 @@ Lighting: a normally lit room is enough. Avoid a bright window behind the keyboa
 
 ## What comes next (in order of value)
 
-1. **Fingering feedback**: compare the finger that pressed each note with the suggested
-   finger (songs with fingering, or the app's own fingering guess) and score it, like
-   Airwave's "right note, wrong finger".
+1. **Fingering feedback**: advisory comparison is implemented behind Settings > Advisory
+   finger coaching. It uses a MIDI press plus fresh, sufficiently confident observations;
+   uncertain attribution is not judged. It never changes the note score. Validate accuracy
+   on hardware before considering scored fingering.
 2. **Get ready hints**: when practice waits for a note, light the key brighter once the
    correct finger is above it, and show the suggested finger on screen.
 3. **Hand posture**: flag collapsed fingers or a dropped wrist from the 3D landmarks.

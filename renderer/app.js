@@ -1,12 +1,24 @@
 import { COLORS, FONTS, MODES, NOTE_VIEWS, NOTE_LABELS } from './theme.js'
-import { IS_WIN, THIS_COMPUTER, TAKES_FOLDER } from './platform.js'
+import { copyText, openExternal, usbProbe } from './host-tools.js'
+import { IS_WIN, IS_ANDROID, IS_IOS, IS_NATIVE_HOST, TOUCH, THIS_COMPUTER, TAKES_FOLDER } from './platform.js'
+import { requestMIDIAccess as requestAndroidMIDIAccess, nativeRequest as androidRequest, onNativeEvent as androidEvents } from './android-midi.js'
 import { Player, fitWindow } from './player.js'
 import { drawScene, noteName, setKeyCount } from './views.js'
 import { loadSongFile } from './songloader.js'
 import { assignFingering } from './fingering.js'
 import { parseMusicXml } from './musicxml.js'
 import { SheetStrip, playedTimeline, timelineX } from './sheet.js'
-import { LedDaemon } from './daemon.js'
+import { LedDaemon, bundledDaemon, daemonStart } from './daemon.js'
+import { mountDiagnostics } from './diagnostics.js'
+import { mountDeviceSupport, fakeMidiAccess, fakeUsb, mpeLike } from './device-support.js'
+import { mountGuided } from './guided.js'
+import { mountInstrumentControls } from './instrument-controls.js'
+import { mountPerformanceControls } from './performance-controls.js'
+import { mountCameraCoach } from './camera-coach.js'
+import { mountAirwaveSource } from './airwave-source.js'
+import { mountEditor } from './editor.js'
+import { createNav } from './nav.js'
+import { mountBackupControls } from './backup.js'
 import { SongScheduler } from './scheduler.js'
 import { HandTracker, listCameras, BONES, TIPS } from './handtrack.js'
 import { summarize } from './scoring.js'
@@ -18,14 +30,15 @@ import {
   setInstrument, currentInstrument, instrumentList, setBend, setPressure, setSlide,
   setPolyPressure, setBendRange, activeVoiceCount, voiceState, clearBacking, isBackingPlaying, setSustain, sustainDown,
   loadRecording, unloadRecording, hasRecording, playRecording, pauseRecording, recordingPosition, nudgeRecording,
-  listOutputs, setOutput, latencyInfo
+  listOutputs, setOutput, latencyInfo, scheduleNote, cancelScheduled, cancelClicks, pendingClicks,
+  createTrack, jamFx, sampledPianoStatus, jamVoiceCount
 } from './audio.js'
 import {
-  importFile, saveImported, listImported, getImported, deleteImported, isLyricsFile, parseLrc, isSafeCover
+  importFile, saveImported, saveImportedBatch, listImported, getImported, deleteImported, isLyricsFile, parseLrc, isSafeCover
 } from './importer.js'
 import {
   noteOn as syNoteOn, noteOff as syNoteOff, clearLights,
-  beginApiMode, setLightingMode, turnOffAllKeys, LIGHTING_MODE,
+  beginApiMode, setLightingMode, turnOffAllKeys, setKeyOn, setKeyOff, endApiMode, LIGHTING_MODE,
   blankOwnColours, restoreOwnColours, velocityForColour
 } from './lights.js'
 import { NOTE_GAMES, ROUND_SECONDS, HINT_AFTER_SECONDS, nextQuestion, isRight, starsFor, staffSvg, pitchClass } from './notegames.js'
@@ -33,6 +46,18 @@ import {
   startTake, stopTake, isRecording, takeBusy, logMidi, onTakeChange, takeElapsed, takeFrameDrawn,
   pickMimeType, MIME_TYPES, TAKE_NAME, mp4Timeline, audioEdit, AAC_PRIMING
 } from './recorder.js'
+import { MUTOPIA_SONGS, mutopiaCredit, applyTempoScale } from './songs-mutopia.js'
+import { cleanGoal, goalProgress, crossedGoal, levelsPresent, composersOf, cleanFilter, applyFilter, countLabel } from './discover.js'
+import { mountInfoDialogs } from './info-dialogs.js'
+import { COURSE, emptyProgress, recordItemResult, recordExamResult, serializeProgress } from './course/index.js'
+import { mountCourse } from './course/course-ui.js'
+import { buildPieceSong, pieceHand, requiredHand, noteGameAccuracy, passText, PLAYER_TYPES, EXERCISE_TYPES } from './course/runners.js'
+import { mountExercise, padSvg } from './course/exercise-ui.js'
+import { mountPractice } from './practice/practice-ui.js'
+import { mountJam } from './jam/jam-ui.js'
+import { downloadFile } from './download.js'
+import { createMpeState } from './mpe-zones.js'
+import { ACTIVITIES, STATS_KEY, parseStats, recordResult, recordUse, railPicks, suggestLevel, HARDER_AT } from './practice/registry.js'
 
 /* ============================== state ============================== */
 const $ = (id) => document.getElementById(id)
@@ -63,16 +88,18 @@ const LIBRARY = [
   { file: 'greensleeves.xml', title: 'Greensleeves', artist: 'Traditional', cover: 'covers/greensleeves.png', level: 'Easy', genre: 'Traditional', hands: 'right' },
   { file: 'canon-in-d.xml', title: 'Canon in D', artist: 'Pachelbel', cover: 'covers/canon-in-d.png', level: 'Easy', genre: 'Classical', hands: 'right' },
   { file: 'minuet-in-g.xml', title: 'Minuet in G', artist: 'Petzold', cover: 'covers/minuet-in-g.png', level: 'Easy', genre: 'Classical', hands: 'right' },
-  { file: 'fur-elise.xml', title: 'Für Elise', artist: 'Beethoven', cover: 'covers/fur-elise.png', level: 'Easy', genre: 'Classical', hands: 'right' }
+  { file: 'fur-elise.xml', title: 'Für Elise', artist: 'Beethoven', cover: 'covers/fur-elise.png', level: 'Easy', genre: 'Classical', hands: 'right' },
+  // advanced piano pieces from the Mutopia Project (MIDI, with credits): see songs-mutopia.js
+  ...MUTOPIA_SONGS
 ]
-const LEVELS = ['Level 1', 'Level 2', 'Beginner', 'Easy']   // easiest first (Sort: Level)
+const LEVELS = ['Level 1', 'Level 2', 'Beginner', 'Easy', 'Intermediate', 'Advanced', 'Virtuoso']   // easiest first (Sort: Level)
 
 const DEFAULTS = {
   brightness: 255, volume: 80, backingVolume: 70,
   countIn: 4, metronome: false, labels: 'off', view: 'CASCADE',
-  hands: 'both', rate: 1, band: false, waitMode: 'pauseAndSnap', instrument: 'grand', keyboardMode: 'Pro', bendRange: 12,
+  hands: 'both', rate: 1, band: false, waitMode: 'pauseAndSnap', instrument: 'sampled-piano', keyboardMode: 'Pro', bendRange: 12,
   accompany: true, kbZero: 48, kbPort: '', kbLast: '', kbKeysFor: {}, kbBaseFor: {}, kbPair: {}, kbLightsLeft: '', kbLightsSwap: false, userColor: '#a78bfa', expression: null, audioOutput: '',
-  recordTakes: false, sheet: false
+  recordTakes: false, sheet: false, exactColors: false, goalMin: 10
 }
 
 const store = {
@@ -84,12 +111,21 @@ const saveSettings = () => store.set('lumi.settings', settings)
 // Light style and expression used to be one setting ("Piano" meant no expression)
 if (settings.expression == null) settings.expression = settings.keyboardMode !== 'Piano'
 delete settings.ledTransport
+settings.goalMin = cleanGoal(settings.goalMin)
 
 let screen = 'home'
 let player = null
 let song = null
 let daemon = null
 let daemonState = 'checking'
+// The packaged Mac app carries its own light service; svcState is its state (starting | ready |
+// failed | external), told by the app at load and again whenever it changes (watchDaemonService)
+const BUNDLED_DAEMON = bundledDaemon()
+let svcState = daemonStart()
+let svcReason = ''
+const bundledOk = () => BUNDLED_DAEMON && svcState !== 'failed'
+let fakeSupportMidi = null
+let deviceSupport = null   // the 'Support my device' wizard (device-support.js)
 let midi = null, midiInput = null, midiOutput = null
 let midiInput2 = null, midiOutput2 = null    // the second keyboard, on its own USB cable
 let freeplay = false
@@ -117,8 +153,20 @@ function cancelCeremony() {
   ledOverrideUntil = 0
 }
 let exerciseMeta = null        // {type, tonic, hand} when playing a toolbox exercise
+let exercise = null            // the exercise on screen (echo, rhythm, ear, sight), see course/exercise-ui.js
+let courseExerciseRun = null   // {ownerId, item} while a course exercise is on screen
+let practiceRun = null         // {activity, level} while a Practice exercise is on screen; its result goes to 'lumi.practice' only
+let practiceUi = null          // the Practice screen (practice/practice-ui.js)
+let jamUi = null               // the Jam screen while it is showing (jam/jam-ui.js): keyboard input goes to it, not to the synth
+let jamLit = new Set()         // pitches Jam's scale lock asks the keyboard to light
+let courseRun = null           // {ownerId, item} while a course item plays; the result is kept in 'lumi.course'
 let lastSummary = null
 let lastMode = 'PLAY'
+let instrumentControls = null
+let performanceControls = null
+let cameraCoach = null
+let airSource = null
+let keyboardGeometry = null
 
 const TONICS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11, 12]
@@ -158,11 +206,51 @@ const GAMES = [
 ]
 let gameMeta = null
 function gameBest(id) { return store.get('lumi.game.' + id, 0) }
+const guided = mountGuided({
+  getPlayer: () => player,
+  getSong: () => freeplay || exerciseMeta || lessonMeta || gameMeta || courseRun ? null : song,
+  store, notice: status, hideResults, onExit: () => syncHudButtons(),
+  beginStep: ({ from, to, hand, mode, rate }) => {
+    hideResults(); cancelCeremony(); player.pause()
+    player.setLoop(null, null, false)
+    player.setSection(from, to); player.setHandFilter(hand); player.setMode(mode)
+    if (mode === 'PRACTISE') player.setAdvancement(settings.waitMode || 'pauseAndSnap')
+    player.setRate(rate); player.restart(false); syncHudButtons(); player.play()
+  }
+})
+const editor = mountEditor({
+  getSong: async () => song?.importedId ? { ...(await getImported(song.importedId)), importedId: song.importedId } : song,
+  saveSong: async (edited) => { const record = await saveImported(edited); await loadImportedLibrary(); await openImported(record.id) },
+  notice: status
+})
+
+const course = mountCourse({
+  host: $('screen-course'), homeHost: $('courseHome'), goto: (name) => showScreen(name), notice: (m) => status(m),
+  confirm: (title, text, ok) => askConfirm(title, text, ok, false), runItem: (item, ctx) => runCourseItem(item, ctx),
+  pushOverlay: (close) => nav.pushOverlay(close)
+})
 
 /* ============================== boot ============================== */
 function boot() {
   const q = new URLSearchParams(location.search)
-  if (IS_WIN) applyWindowsPage()
+  if (IS_WIN || IS_NATIVE_HOST) applyWindowsPage()
+  document.documentElement.classList.toggle('touch', TOUCH)
+  if (IS_NATIVE_HOST) {
+    // touch.css keys its phone/tablet rules on .android; the iPhone/iPad app shares them (and adds .ios for its own)
+    document.documentElement.classList.add('android')
+    if (IS_IOS) document.documentElement.classList.add('ios')
+    $('impLookup').checked = false; $('impLookup').disabled = true; $('impLookup').closest('label').classList.add('hidden')   // this build makes no network calls
+    for (const id of ['airCard', 'setExperimental']) $(id).classList.add('hidden')   // the Airwave sensor is a desktop USB device
+    document.querySelector('#settingsJump [data-jump="setExperimental"]').classList.add('hidden')
+    $('fingerSource').closest('label').classList.add('hidden')
+    $('fingerSource').value = 'camera'
+    for (const p of document.querySelectorAll('#deviceDialog p')) p.textContent = p.textContent.replace(/your computer/g, 'your device').replace(/this computer/g, 'this device')
+    $('exactHint').textContent = 'Lights each key in its true colour from MIDI notes. Experimental: if the keys stop lighting, turn it off.'
+    $('obOctaveHint').textContent = 'Later, in the player, − and + at the top right move your keys an octave down or up.'
+    // the shortcuts overlay is for a keyboard: it is offered once a real key has been pressed (a Bluetooth or USB keyboard)
+    document.addEventListener('keydown', (e) => { if (e.code && e.key !== 'Unidentified' && e.key !== 'Process') document.documentElement.classList.add('has-keys') }, true)
+    $('importPrivacy').textContent = 'Files and transcription stay on this device. Cover art and lyrics are read from the file’s own tags. Only add music you have the right to use.'
+  }
   wireUI()
   if (q.has('notation')) settings.sheet = q.get('notation') === '1'   // notation=1: for screenshots
   if ([...KB_SIZES, 48].includes(Number(q.get('keys')))) settings.kbKeysFor[kbLabel()] = Number(q.get('keys'))   // keys=49 or 48: the longer keyboards, for screenshots
@@ -186,7 +274,17 @@ function boot() {
   // nokb=1 (LUMI_NO_KEYBOARD=1, as scripts/record-clip.sh runs): no MIDI and no key lights,
   // so a test or clip run neither hears someone playing the keyboard nor takes its lights
   // and settings from the app they are playing in
-  if (!q.has('nokb')) { initDaemon(); initMidi() }
+  if (!q.has('nokb')) { if (!IS_NATIVE_HOST) initDaemon(); initMidi() }
+  // Bluetooth keyboards (Android only): loaded on demand, so no other platform runs any of it
+  if (IS_ANDROID && !q.has('nokb')) import('./android-ble.js').then(({ mountBle }) => mountBle({ host: { request: androidRequest, subscribe: androidEvents }, notify: (m) => status(m) }))
+    .catch((e) => console.log('Bluetooth keyboard setup failed: ' + e.message))
+  // Bluetooth keyboards on iOS are paired in the system sheet; the page only offers the button
+  if (IS_IOS && !q.has('nokb')) import('./ios-ble.js').then(({ mountPairing }) => mountPairing({ host: { request: androidRequest }, notify: (m) => status(m) }))
+    .catch((e) => console.log('Bluetooth pairing setup failed: ' + e.message))
+  if (IS_NATIVE_HOST) document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return
+    player?.pause(); stopAll(); setSustain(false); performanceControls?.panic(); clearNoteLights(); held.clear(); syncHudButtons()
+  })
   renderLibrary()
   renderRecent()
   updateHome()
@@ -199,7 +297,7 @@ function boot() {
       const pos = Number(q.get('pos') || 0)
       if (pos) player.seek(pos)
       if (q.get('mode')) setMode(q.get('mode'))
-      if (q.get('view')) { settings.view = q.get('view'); player.setView(settings.view); syncHudButtons() }
+      if (q.get('view')) { settings.view = q.get('view'); player.setView(settings.view); applySheet(); syncHudButtons() }
       if (q.get('labels')) { settings.labels = q.get('labels'); player.setNoteLabels(settings.labels); syncHudButtons() }
       // hands=left|right|both: the hand to practise, as the Hands button sets it (not saved)
       if (['left', 'right', 'both'].includes(q.get('hands'))) { settings.hands = q.get('hands'); player.setHandFilter(settings.hands); syncHudButtons() }
@@ -467,8 +565,8 @@ function finishSetup(lesson) {
   store.set('lumi.onboarded', true)
   closeSetup()
   console.log('SETUP done sound=' + (setup.heard != null) + ' keys=' + setup.rangeDone + ' lights=' + (setup.lights || 'skipped'))
-  if (lesson) startLessonStep(LESSONS[0], 'WATCH')
-  else { showScreen('home'); status('Pick a lesson or a song to start') }
+  if (lesson) course.openStep()   // the course's first lesson
+  else { showScreen('home'); status('Pick a lesson or a song to start'); window.dispatchEvent(new Event('keylight:first-run-complete')) }
 }
 
 function goSetupStep(i) {
@@ -654,18 +752,21 @@ function renderSetup() {
       title: canLight ? 'Watch your keys' : 'Light up your keys',
       copy: canLight ? 'A light runs along your keys from left to right.'
         : noteLightsOnly() ? 'Your keys light up to show you what to play next, and stay dark otherwise.'
+        : bundledOk() ? 'Key lights are ready: your keys light up to show you what to play next.'
         : 'Your keys light up to show you what to play next. A free helper, blocksd, drives the lights.',
       check: canLight
         ? (setup.lights === 'yes' ? ['ok', 'Your keys light up']
           : setup.lights === 'no' ? ['warn', 'Check the keyboard is switched on and plugged in over USB, then show the lights again.']
           : ['wait', 'Did your keys light up?'])
-        : lights === 'no-device' ? ['warn', 'The light service is running but can’t find your keyboard. Plug it in over USB and switch it on.']
-        : lights === 'checking' ? ['wait', noteLightsOnly() ? 'Looking for your keyboard…' : 'Looking for the light service…']
+        : lights === 'no-device' ? ['warn', (bundledOk() ? 'Key lights are ready, but they can’t find your keyboard.' : 'The light service is running but can’t find your keyboard.') + ' Plug it in over USB and switch it on.']
+        : lights === 'checking' ? ['wait', noteLightsOnly() || bundledOk() ? 'Looking for your keyboard…' : 'Looking for the light service…']
         : lights === 'no-output' ? ['warn', 'No keyboard found yet. Plug it in over USB and switch it on.']
         : lights === 'no-light-port' ? ['warn', canChooseLights() ? 'Your keyboard plays, but its name doesn’t say it can light up. If this is your light-up keyboard, choose it by name below.'
           : 'Your keyboard plays, but Keylight doesn’t recognise its name, and on most keyboards light notes would play as music. So its keys stay unlit.']
+        : bundledOk() ? ['warn', 'The key lights are still starting. If this stays, quit and reopen Keylight.']
+        : BUNDLED_DAEMON ? ['warn', 'The light service could not start. Keys that can light from MIDI notes still do; the steps below add the full-colour lights.']
         : ['warn', 'The light service isn’t running, so your keys can’t light up yet.'],
-      skip: canLight && setup.lights == null ? 'Skip' : 'Continue without key lights'
+      skip: canLight && setup.lights == null ? 'Skip' : 'Play without lights'
     }
   } else {
     const all = SETUP_STEPS.slice(0, 3).every(setupPassed)
@@ -690,14 +791,19 @@ function renderSetup() {
   const inputs = midi ? [...midi.inputs.values()].filter((p) => p.state !== 'disconnected').length : 0
   $('obPortRow').classList.toggle('hidden', !(step === 'lights' ? lights === 'no-light-port' && canChooseLights()
     : step !== 'ready' && (settings.kbPort || inputs > 1 || (inputs && !midiInput))))
-  setText($('obOctaveHint'), keysStayAt() != null ? 'Later, in the player, − and + at the top right line the screen up with your keys if they ever differ. Z and X do the same.'
-    : 'Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.')
+  setText($('obOctaveHint'), (keysStayAt() != null ? 'Later, in the player, − and + at the top right line the screen up with your keys if they ever differ. Z and X do the same.'
+    : 'Later, in the player, − and + at the top right move your keys an octave down or up. Z and X do the same.').replace(TOUCH ? ' Z and X do the same.' : '\u0000', ''))
   // Bluetooth headphones are the usual cause of a long output delay
   const ac = audioContext()
   const out = ac ? ac.outputLatency || 0 : 0
   $('obLatency').classList.toggle('hidden', !(out > 0.05))
   if (out > 0.05) setText($('obLatency'), 'Your speakers or headphones add about ' + Math.round(out * 1000) + ' ms of delay; wired headphones keep you in time. Bluetooth is the usual cause.')
-  $('obInstall').classList.toggle('hidden', lights !== 'off')
+  // No Terminal steps when the app carries its own light service; if it could not start, the old manual route stays, folded away
+  $('obInstall').classList.toggle('hidden', !(lights !== 'checking' && (BUNDLED_DAEMON ? svcState === 'failed' : lights === 'off')))
+  if (BUNDLED_DAEMON && svcState === 'failed') {
+    setText($('obInstallIntro'), 'The key lights could not start in this copy of Keylight (' + (svcReason || 'the light service stopped') + '), so the keys light from MIDI notes instead.')
+    setText($('obInstallSummary'), 'Advanced: install the light service by hand')
+  }
   $('obLightsAgain').classList.toggle('hidden', !(canLight && setup.lights === 'no'))
   $('obSwapLights').classList.toggle('hidden', !(step === 'lights' && canLight && canSwapLights()))
   if (step === 'ready') renderSetupSummary(lights)
@@ -763,7 +869,7 @@ function wireFirstRunUI() {
   $('obSwapLights').onclick = () => { swapLights(); setup.lights = null; renderSetup(); sweepSetupLights() }
   $('swapLights').onclick = () => { swapLights(); runLightTest() }
   $('obCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText($('obCode').textContent); status('Copied: paste it into Terminal') } catch { status('Select the two lines and copy them with ⌘C') }
+    try { await copyText($('obCode').textContent); status('Copied: paste it into Terminal') } catch { status('Select the two lines and copy them with ⌘C') }
   }
   for (const id of ['kbPort', 'obKbPort']) $(id).onchange = (e) => { settings.kbPort = e.target.value; saveSettings(); bindMidiPorts(); fillKbPorts() }
   $('kbKeys').onchange = (e) => {
@@ -813,8 +919,47 @@ function showAudioLatency() {
 
 function wireUI() {
   wireKeysUI()
-  for (const b of document.querySelectorAll('#nav button')) b.onclick = () => showScreen(b.dataset.screen)
-  $('back').onclick = () => showScreen(screen === 'play' ? prevScreen : 'home')
+  performanceControls = mountPerformanceControls(status)
+  mountBackupControls($('backupControls'), { listSongs: listImported, saveSongs: saveImportedBatch, storage: localStorage, notice: status, onRestored: () => location.reload() })
+  $('editSong').onclick = () => { guided.close(); player?.pause(); endTake('editing notes'); editor.open() }
+  const onScreenKeys = () => keyboardGeometry && keyboardGeometry.keys[0]?.pitch === player?.windowStart ? keyboardGeometry.keys : null
+  airSource = mountAirwaveSource({ settings, save: saveSettings, getKeys: onScreenKeys, notice: status,
+    platform: IS_ANDROID ? 'Android' : IS_IOS ? 'iOS' : IS_WIN ? 'Windows' : 'Mac',
+    version: new URLSearchParams(location.search).get('appVersion') || 'development checkout',
+    airwaveMidi: () => !!midi && [...midi.inputs.values()].some((port) => /airwave/i.test(portLabel(port))) })
+  cameraCoach = mountCameraCoach({ settings, save: saveSettings, getTracker: () => (airSource.selected() ? airSource.tracker : tracker),
+    getKeys: onScreenKeys, getKeyCount: kbKeys, sourceName: () => (airSource.selected() ? 'Airwave sensor' : 'camera') })
+  mountDiagnostics(() => ({
+    version: new URLSearchParams(location.search).get('appVersion') || 'development checkout',
+    platform: IS_ANDROID ? 'Android' : IS_IOS ? 'iOS' : IS_WIN ? 'Windows' : 'Mac',
+    midiAvailable: !!midi,
+    inputs: midi ? [...midi.inputs.values()] : [], outputs: midi ? [...midi.outputs.values()] : [],
+    keyboard: midiInput?.name, keyboard2: midiInput2?.name,
+    range: keysRange(), lightOutput: midiOutput?.name,
+    lights: { transport: framesDrive() ? 'Full colour frames' : noteLightsOnly() ? 'MIDI notes' : 'No active transport', state: daemonState, boards: daemon?.count || 0 },
+    audio: latencyInfo(), camera: { running: cameraOn(), calibrated: !!tracker?.calib }, ...performanceControls.describe()
+  }))
+  {
+    const query = new URLSearchParams(location.search)
+    const fake = query.has('devicefake')     // a stand-in keyboard, for screenshots and the self-test
+    deviceSupport = mountDeviceSupport({
+      fake, getMidi: () => fakeSupportMidi || (fake ? (fakeSupportMidi = fakeMidiAccess()) : midi),
+      platform: IS_ANDROID ? 'Android' : IS_IOS ? 'iOS' : IS_WIN ? 'Windows' : 'Mac', version: query.get('appVersion') || 'development checkout',
+      usbProbe: () => (fakeSupportMidi ? fakeUsb() : usbProbe()),
+      boundInputs: () => [midiInput, midiInput2],
+      appKeys: () => kbKeys(),
+      lightRoute: () => (framesDrive() ? 'full colour frames' : noteLightsOnly() && midiOutput ? 'MIDI notes' : 'none'),
+      canTestLights: () => (!!midiOutput || framesDrive()) && !$('testLights').disabled,
+      testLights: () => runLightTest(),
+      cancelLights: () => cancelLightTest(),
+      copy: (text) => copyText(text),
+      openLink: (url) => openExternal(url)
+    })
+    window.keylightDeviceSupport = fake || query.has('selftest') ? deviceSupport : undefined
+  }
+  mountStageTouch()
+  for (const b of document.querySelectorAll('#nav button')) b.onclick = () => showScreen(b.dataset.screen, { tab: true })
+  $('back').onclick = () => nav.back()
   $('openSettings').onclick = () => showScreen('settings')
   for (const b of document.querySelectorAll('#speedTrack button')) b.onclick = () => setSpeed(b.dataset.speed)
   $('btnWatch').onclick = toggleWatch
@@ -867,6 +1012,22 @@ function wireUI() {
   }
   refreshCameraList()
   $('openImport').onclick = openImportSheet
+  wireComposerMenu()
+  mountInfoDialogs({
+    version: new URLSearchParams(location.search).get('appVersion') || 'development checkout',
+    songCount: LIBRARY.length, mutopiaCount: MUTOPIA_SONGS.length,
+    canOpen: () => $('results').classList.contains('hidden') && !setup.open && !viewMenuOpen()
+  })
+  for (const host of [$('searchEmpty'), $('bestList'), $('recentList')]) host.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-empty]')
+    if (!b) return
+    if (b.dataset.empty === 'add') openImportSheet()
+    else if (b.dataset.empty === 'clear') clearFilters()
+    else if (b.dataset.empty === 'recent') { searchChip = 'songs'; showScreen('search') }
+    else { searchTerm = ''; $('search').value = ''; searchChip = 'lessons'; showScreen('search') }
+  })
+  for (const b of document.querySelectorAll('#settingsJump [data-jump]')) b.onclick = () => jumpSettings(b.dataset.jump)
+  $('daemonRetry').onclick = retryDaemon
   $('importClose').onclick = closeImportSheet
   $('importFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) await handleImportFile(f) }
   $('impPlay').onclick = async () => { await renameImported(); closeImportSheet(); if (importedRecord) openImported(importedRecord.id) }
@@ -881,7 +1042,7 @@ function wireUI() {
     applySheet()
     syncHudButtons()
   }
-  $('btnLyrics').onclick = () => { showLyrics = !showLyrics; if (song) applySongMedia({ ...song, audio: null, cover: song.cover }); $('btnLyrics').classList.toggle('on', showLyrics) }
+  $('btnLyrics').onclick = () => { showLyrics = !showLyrics; if (song) applySongMedia({ ...song, audio: null, cover: song.cover }); $('btnLyrics').classList.toggle('on', showLyrics); $('btnLyrics').setAttribute('aria-pressed', String(showLyrics)) }
   // drop a song anywhere in the window
   let dragDepth = 0
   window.addEventListener('dragenter', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { dragDepth++; $('dropOverlay').classList.remove('hidden'); $('dropZone').classList.add('over') } })
@@ -916,19 +1077,9 @@ function wireUI() {
   $('waitMode').onchange = (e) => {
     settings.waitMode = e.target.value; saveSettings()
     if (player && player.mode === 'PRACTISE') player.setAdvancement(settings.waitMode)
-    status('Practise wait: ' + (settings.waitMode === 'pauseAndSnap' ? 'wait for the note' : 'pause & continue'))
+    status('Practice wait: ' + (settings.waitMode === 'pauseAndSnap' ? 'wait for the note' : 'pause & continue'))
   }
-  const instSel = $('instrument')
-  if (instSel) {
-    instSel.replaceChildren()
-    for (const inst of instrumentList()) {
-      const o = document.createElement('option')
-      o.value = inst.id; o.textContent = inst.name
-      instSel.appendChild(o)
-    }
-    instSel.value = settings.instrument
-    instSel.onchange = (e) => { settings.instrument = e.target.value; saveSettings(); setInstrument(settings.instrument); syncHudButtons(); status('Instrument: ' + e.target.selectedOptions[0].textContent) }
-  }
+  instrumentControls = mountInstrumentControls({ settings, save: saveSettings, notice: status, changed: syncHudButtons })
   const kbdSel = $('kbdMode')
   if (kbdSel) {
     kbdSel.value = settings.keyboardMode
@@ -946,14 +1097,20 @@ function wireUI() {
     $('mpeState').textContent = settings.expression ? 'waiting for bend/pressure…' : 'off'
     status(settings.expression ? 'Pitch bend and pressure on: wiggle or press into a key' : 'Pitch bend and pressure off: keys play like a piano')
   }
+  $('exactColors').checked = !!settings.exactColors
+  $('exactColors').onchange = (e) => {
+    settings.exactColors = e.target.checked
+    saveSettings()
+    if (!settings.exactColors) leaveApiMode()
+    clearNoteLights()
+    status(settings.exactColors ? 'Exact colours on: each key lights in its true colour' : 'Exact colours off: keys use the keyboard\'s own colours')
+  }
   const bendSel = $('bendRange')
   if (bendSel) {
     bendSel.value = String(settings.bendRange)
     bendSel.onchange = (e) => { settings.bendRange = Number(e.target.value); saveSettings(); setBendRange(settings.bendRange); syncHudButtons(); applyDeviceMode() }
   }
-  setInstrument(settings.instrument || 'grand')
   setBendRange(settings.bendRange || 12)
-  $('btnInst').onclick = cycleInstrument
   $('bandToggle').checked = !!settings.band
   $('recordTakes').checked = !!settings.recordTakes
   $('recordTakes').onchange = (e) => {
@@ -969,6 +1126,12 @@ function wireUI() {
   onTakeChange((state) => { if (state && state.stopping && state.reason === 'time limit' && takeRun) takeDeclined = takeRun })
   $('bandToggle').onchange = (e) => { settings.band = e.target.checked; saveSettings(); status('Generated band ' + (settings.band ? 'on' : 'off')) }
   // show and apply the saved values (the sliders used to come back at their defaults)
+  $('fxMode').value = settings.fx || (IS_ANDROID ? 'lite' : 'full')
+  $('fxMode').onchange = (e) => { settings.fx = e.target.value === 'lite' ? 'lite' : 'full'; saveSettings(); window.keylightSetFx?.(settings.fx); status('Visual effects: ' + (settings.fx === 'lite' ? 'Lite' : 'Full')) }
+  $('goalMin').value = String(settings.goalMin)
+  $('goalMin').onchange = (e) => { settings.goalMin = cleanGoal(e.target.value); saveSettings(); updateGoal(); status('Daily goal: ' + settings.goalMin + ' minutes') }
+  $('goalRing').onclick = () => jumpSettings('setPractice', true)
+  $('openToolbox').onclick = () => showScreen('toolbox')
   $('brightness').value = String(settings.brightness)
   $('volume').value = String(settings.volume)
   $('backingVolume').value = String(settings.backingVolume)
@@ -1001,14 +1164,14 @@ function wireUI() {
   // Progress and settings reset apart, each after saying what goes: settings hold the
   // keyboard's octave calibration, your light style and colour. Only progress keys go,
   // so favourites, added songs and anything else stored stay.
-  const PROGRESS_KEY = /^lumi\.(best|game|lesson|lessonwatched|lessonpractised|exercise|days|streak|recent)(\.|$)/
-  $('resetProgress').onclick = () => {
-    if (!confirm('Reset your progress on ' + THIS_COMPUTER + '?\n\nThis erases your stars and best scores, lessons, games, Scales & chords, minutes played, your streak and recently played songs. Your settings, favourites and added songs are kept.')) return
+  const PROGRESS_KEY = /^lumi\.(best|game|lesson|lessonwatched|lessonpractised|exercise|course|practice|days|streak|recent|guided\.(progress|weak|section))(\.|$)/
+  $('resetProgress').onclick = async () => {
+    if (!(await askConfirm('Reset your progress on ' + THIS_COMPUTER + '?', 'This erases your stars and best scores, lessons, games, Scales & chords, guided practice progress and weak bars, your Practice results, minutes played, your streak and recently played songs. Your settings, guided practice preferences, favourites, added songs and Jam sessions are kept.', 'Reset progress'))) return
     for (const k of Object.keys(localStorage)) if (PROGRESS_KEY.test(k)) localStorage.removeItem(k)
     location.reload()
   }
-  if ($('resetSettings')) $('resetSettings').onclick = () => {
-    if (!confirm('Put every setting back to its default?\n\nThis resets sound, lights, practice options, your colour and the keyboard octave calibration. Your progress is kept.')) return
+  if ($('resetSettings')) $('resetSettings').onclick = async () => {
+    if (!(await askConfirm('Put every setting back to its default?', 'This resets sound, lights, practice options, your colour and the keyboard octave calibration. Your progress is kept.', 'Reset settings'))) return
     localStorage.removeItem('lumi.settings')
     location.reload()
   }
@@ -1025,14 +1188,26 @@ function wireUI() {
   }
   $('resClose').onclick = hideResults
   // progress seek / loop markers
+  const seekTo = (pos) => {
+    if (!player || !song) return
+    const from = player.sectionStart || 0
+    player.seek(Math.max(from, Math.min(player.end, pos)))
+    syncBacking()
+  }
   $('progress').onclick = (e) => {
     if (!player || !song) return
     const r = $('progress').getBoundingClientRect()
     const from = player.sectionStart || 0
     const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))
-    player.seek(from + frac * (player.end - from))
-    syncBacking()
+    seekTo(from + frac * (player.end - from))
   }
+  // arrow keys seek: 5 seconds back or forward
+  $('progress').addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    if (!player || !song) return
+    e.preventDefault()
+    seekTo(player.currentPosition() + (e.key === 'ArrowRight' ? 5 : -5))
+  })
   document.addEventListener('keydown', (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return
     // The results are a dialog: its keys never reach the player behind it (a focused
@@ -1050,7 +1225,7 @@ function wireUI() {
     }
     if (viewMenuOpen() && handleViewMenuKey(e)) return
     if (e.key === 'Escape') {
-      if (screen === 'play') showScreen(prevScreen)
+      if (screen === 'play' || screen === 'exercise' || screen === 'jam') nav.back()
       return
     }
     if (screen !== 'play') return
@@ -1070,6 +1245,12 @@ function wireUI() {
     const img = e.target
     if (!(img instanceof HTMLImageElement) || !img.classList.contains('c-img')) return
     const src = img.getAttribute('src') || ''
+    // a built-in cover gets one more try (a busy start can drop a request); a second failure removes it
+    if (!src.startsWith('data:') && !retriedCovers.has(src)) {
+      retriedCovers.add(src)
+      setTimeout(() => { if (img.isConnected) { img.removeAttribute('src'); img.setAttribute('src', src) } }, 800)
+      return
+    }
     if (!src.startsWith('data:')) missingCovers.add(src)
     img.remove()
   }, true)
@@ -1082,42 +1263,176 @@ function wireUI() {
   wireFirstRunUI()
 }
 
+/* ============================== playing the on-screen keys by touch ============================== */
+// A finger (or a mouse, or a pen) on the keyboard at the foot of the player plays that key, as a MIDI key does:
+// handleNoteOn / handleNoteOff, so the sound, the score, the lights and the exercises all hear it. One pointer id
+// per finger, so a chord is several fingers; sliding to the next key moves the note; a cancelled touch (the system
+// takes the gesture, the window loses focus, the screen is left) lets go, so nothing is left sounding.
+const stageFingers = new Map()   // pointerId -> pitch
+function stageKeyAt(e) {
+  if (screen !== 'play' || !keyboardGeometry) return null
+  const r = canvas.getBoundingClientRect()
+  if (!r.width) return null
+  const x = (e.clientX - r.left) * (canvas.width / stageDpr / r.width), y = (e.clientY - r.top) * (canvas.height / stageDpr / r.height)
+  const i = keyboardGeometry.keyAt(x, y)
+  const key = i >= 0 ? keyboardGeometry.keys[i] : null
+  return key && key.pitch > 0 ? key.pitch : null
+}
+function stageRelease(id) {
+  const pitch = stageFingers.get(id)
+  if (pitch === undefined) return
+  stageFingers.delete(id)
+  if (![...stageFingers.values()].includes(pitch)) handleNoteOff(pitch)
+}
+function stageReleaseAll() { for (const id of [...stageFingers.keys()]) stageRelease(id) }
+function mountStageTouch() {
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || screen !== 'play') return
+    const pitch = stageKeyAt(e)
+    if (pitch == null) return
+    e.preventDefault()
+    try { canvas.setPointerCapture(e.pointerId) } catch (_e) { /* not needed */ }
+    stageFingers.set(e.pointerId, pitch)
+    handleNoteOn(pitch, 96)
+  })
+  canvas.addEventListener('pointermove', (e) => {
+    const held = stageFingers.get(e.pointerId)
+    if (held === undefined) return
+    const pitch = stageKeyAt(e)
+    if (pitch == null || pitch === held) return
+    stageRelease(e.pointerId)
+    stageFingers.set(e.pointerId, pitch)
+    handleNoteOn(pitch, 96)
+  })
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, (e) => stageRelease(e.pointerId))
+  window.addEventListener('blur', stageReleaseAll)
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stageReleaseAll() })
+}
+
+/* ============================== Android back button ============================== */
+// The host asks this when Back is pressed: true when the page used it (closed a dialog, went up a screen),
+// false only on Home with nothing to go back to, where the app then leaves. Dialogs and sheets close first (the rules above),
+// then the same navigation stack as the on-screen back button and Escape.
+globalThis.__keylightBack = () => {
+  const dialog = [...document.querySelectorAll('dialog[open]')].pop()
+  if (dialog) { if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close(); return true }
+  if (!$('results').classList.contains('hidden')) { hideResults(); return true }
+  if (!$('onboarding').classList.contains('hidden')) { closeSetup(); return true }
+  if (!$('importSheet').classList.contains('hidden')) { closeImportSheet(); return true }
+  const guidedRoot = document.querySelector('.guided:not(.hidden)')
+  if (guidedRoot) { guidedRoot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true }
+  if (!$('composerPop').classList.contains('hidden')) { closeComposerMenu(true); return true }
+  if (viewMenuOpen()) { closeViewMenu(); return true }
+  return nav.back()
+}
+
 /* ============================== screens ============================== */
 // Search has no title: its "Search here" pill sits in the middle of the top bar instead
 const SCREEN_TITLES = {
-  home: ['', ''], search: ['', ''], achievements: ['Achievements', 'Your progress on ' + THIS_COMPUTER],
-  quiz: ['', ''],
+  home: ['', ''], course: ['Course', 'Learn piano step by step'], search: ['', ''], achievements: ['Achievements', 'Your progress on ' + THIS_COMPUTER],
+  quiz: ['', ''], exercise: ['Course', 'Learn piano step by step'], practice: ['Practice', 'Exercises, the Playground and a metronome'], jam: ['Jam', 'Loop and layer your own music'],
   toolbox: ['Scales & chords', 'Pick a key, then practise it'], games: ['Games', 'Hit the notes in time, beat the pass mark'],
   settings: ['Settings', 'Lights, sound and practice']
 }
-let prevScreen = 'home'
-function showScreen(name) {
+// Where Back goes lives in nav.js. showScreen records the move on its stack; showScreenNow below
+// does the switch (and the clean-up of the screen being left) and is only called by the stack.
+// Nav-bar tabs and Home start a fresh stack; everything else pushes. The play screen, a quiz and
+// an exercise are never gone back to, and the Course screen keeps its own inner pages (map, lesson,
+// exam, theory) and answers Back with its own back button first.
+const NAV_SCREENS = {
+  home: { save: saveScroll },
+  course: {
+    save: saveScroll,
+    handleBack: () => { const up = $('screen-course').querySelector('.cr-back'); if (up) { up.click(); return true } return false }
+  },
+  search: {
+    save: (e) => { saveScroll(e); e.params = { text: $('search').value, chip: searchChip } }
+  },
+  achievements: { save: saveScroll },
+  practice: { save: saveScroll },
+  toolbox: { save: (e) => { saveScroll(e); e.params = { tb: { ...tb } } } },
+  games: { save: saveScroll },
+  settings: { save: saveScroll },
+  play: { transient: true },
+  quiz: { transient: true },
+  jam: { transient: true },
+  exercise: {
+    transient: true,
+    handleBack: () => { if (!courseExerciseRun) return false; course.openOwner(courseExerciseRun.ownerId); return true }
+  }
+}
+function saveScroll(entry) {
+  const el = $('screen-' + entry.screen)
+  if (el) entry.scroll = el.scrollTop
+}
+const nav = createNav({
+  screens: NAV_SCREENS,
+  initial: 'home',
+  onShow: (entry, { back }) => {
+    const p = entry.params || {}
+    if (back && entry.screen === 'search' && typeof p.text === 'string') {
+      $('search').value = p.text
+      searchTerm = p.text.trim().toLowerCase()
+      if (p.chip) searchChip = p.chip
+    }
+    if (back && entry.screen === 'toolbox' && p.tb) Object.assign(tb, p.tb)
+    showScreenNow(entry.screen)
+    const el = $('screen-' + entry.screen)
+    if (back && el && entry.scroll) el.scrollTop = entry.scroll
+  }
+})
+// A song or a course item was just passed: the next time the user is back on Home is a calm moment
+// (support.js decides whether to offer the support reminder then).
+let calmPending = false
+const markCalm = (passed) => { if (passed) calmPending = true }
+
+function showScreen(name, opts = {}) {
   if (name === 'learn') name = 'search'
-  closeViewMenu()
   if (name === 'play' && !song && !freeplay) {
     const r = recent()[0]
     if (r) { openLibrary(r.file); return }
   }
+  if (name === 'home' || opts.tab) nav.resetTo(name)
+  else nav.go(name)
+}
+function showScreenNow(name) {
+  closeViewMenu()
   if (name !== 'quiz') quiz = null
+  if (name !== 'exercise' && exercise) { exercise.destroy(); exercise = null }
+  if (name !== 'exercise') { courseExerciseRun = null; practiceRun = null }
+  if (name !== 'jam' && jamUi) { const j = jamUi; jamUi = null; jamLit = new Set(); j.destroy() }
+  if (name !== 'practice' && practiceUi) practiceUi.stopMetronome()      // the metronome only runs while its screen is open
+  if (name !== 'quiz' && name !== 'play') courseRun = null
   if (screen === 'play' && name !== 'play') {
     endTake('left the player')
     clearNoteLights()
     if (player && player.active) { player.pause(); stopBacking(); pauseRecording() }
   }
-  if (name !== 'play' && screen !== name) prevScreen = ['home', 'search', 'achievements'].includes(screen) ? screen : prevScreen
   screen = name
   document.body.dataset.screen = name
   document.body.classList.toggle('freeplay', name === 'play' && freeplay)
   for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden')
   const el = $('screen-' + name)
   if (el) { el.classList.remove('hidden'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '' }
-  for (const b of document.querySelectorAll('#nav button')) b.classList.toggle('on', b.dataset.screen === name)
-  const t = SCREEN_TITLES[name]
+  for (const b of document.querySelectorAll('#nav button')) {
+    const active = b.dataset.screen === (name === 'exercise' ? (practiceRun ? 'practice' : 'course') : name)
+    b.classList.toggle('on', active)
+    if (active) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
+  }
+  const t = name === 'exercise' && practiceRun ? SCREEN_TITLES.practice : SCREEN_TITLES[name]
+  $('subtitle').title = ''
   if (t) { $('title').textContent = t[0]; $('subtitle').textContent = t[1] }
-  if (name === 'home') updateHome()
+  if (name === 'home') {
+    updateHome()
+    if (calmPending) { calmPending = false; window.dispatchEvent(new Event('keylight:calm-moment')) }
+  }
   if (name === 'settings') showAudioLatency()
+  if (name === 'course') course.show()
   if (name === 'search') { renderLibrary(); setTimeout(() => $('search').focus(), 50) }
   if (name === 'achievements') renderAchievements()
+  if (name === 'practice' && practiceUi) practiceUi.refresh()
+  if (name === 'jam' && !jamUi) jamUi = mountJam($('screen-jam'), jamDeps())
   if (name === 'games') renderGames()
   if (name === 'toolbox') renderToolbox()
   if (name === 'settings') { refreshProgressUI(); syncKbRange() }
@@ -1130,6 +1445,8 @@ function tileAction(go) {
   if (go === 'freeplay') return startFreeplay()
   if (go === 'toolbox') return showScreen('toolbox')
   if (go === 'games') return showScreen('games')
+  if (go === 'practice') return showScreen('practice', { tab: true })
+  if (go === 'achievements') return showScreen('achievements')
 }
 
 /* ============================== achievements ============================== */
@@ -1191,7 +1508,7 @@ function renderAchievements() {
   const rows = songs.map((l) => ({ l, b: bestFor(l.file) })).filter((x) => x.b > 0).sort((a, b) => b.b - a.b)
   bl.innerHTML = rows.length
     ? rows.map(({ l, b }) => `<div class="best-row">${itemCover(l, { showTitle: false })}<div class="br-name">${escapeHtml(l.title)}<div class="tile-sub">${escapeHtml(l.artist)}</div></div><span class="g-stars">${Array.from({ length: 5 }, (_, i) => `<svg class="${i < b ? 'on' : ''}"><use href="#i-star"/></svg>`).join('')}</span></div>`).join('')
-    : '<div class="empty" style="padding:24px 0">Finish a song to see your best scores here.</div>'
+    : '<div class="empty" style="padding:24px 0">Finish a song to see your best scores here.<div class="empty-actions"><button class="mini-btn" data-empty="lessons">Play a lesson</button><button class="mini-btn" data-empty="add">Add a song</button></div></div>'
 }
 
 /* ============================== library ============================== */
@@ -1245,6 +1562,7 @@ const SORT_LABELS = { title: 'Title', level: 'Level', recent: 'Recently played' 
 // Imported songs show their own cover, built-in ones their covers/ file, both over the
 // generated art: a cover that fails to load is removed (wireUI) and the art shows instead.
 const missingCovers = new Set()      // cover files that failed to load, not asked for again
+const retriedCovers = new Set()      // cover files that failed once and were asked for again
 function coverSrc(item) {
   // only validated base64 image data URLs (imported covers) and our own covers/ files go in the page
   if (isSafeCover(item.cover)) return item.cover
@@ -1260,6 +1578,15 @@ function allSongs() {
   return [...mine, ...LIBRARY]
 }
 const findSong = (file) => allSongs().find((l) => l.file === file)
+async function removeImportedSong(item) {
+  if (!(await askConfirm(`Remove "${item.title}" from your library?`, 'The song and its best score are deleted from ' + THIS_COMPUTER + '. This can’t be undone.', 'Remove'))) return
+  await deleteImported(item.id)
+  localStorage.removeItem('lumi.best.' + item.file)
+  localStorage.removeItem('lumi.fav.' + item.file)
+  store.set('lumi.recent', recent().filter((r) => r.file !== item.file))
+  await loadImportedLibrary()
+  renderRecent()
+}
 function openItem(item) { return item.imported ? openImported(item.id) : openLibrary(item.file) }
 async function loadImportedLibrary() {
   try { importedSongs = (await listImported()).sort((a, b) => (b.added || 0) - (a.added || 0)) } catch (e) { console.log('IMPORT library unavailable: ' + e.message); importedSongs = [] }
@@ -1274,18 +1601,12 @@ function coverTile(item) {
     : ''
   const fav = isFav(item.file)
   b.innerHTML = `<button class="cover-btn">${itemCover(item, { stars: bestFor(item.file), extra })}</button>
-    <div class="tile-meta"><div><div class="tile-name">${escapeHtml(item.title)}</div><div class="tile-sub">${escapeHtml(item.artist)}</div></div>
+    <div class="tile-meta"><div><div class="tile-name">${escapeHtml(item.title)}</div><div class="tile-sub">${escapeHtml(item.artist)}${item.heavy ? '<span class="long-tag" title="A long or note-dense piece: slow it down with the speed buttons">Long piece</span>' : ''}</div></div>
     <button class="heart ${fav ? 'on' : ''}" title="Favourite" aria-label="Favourite" aria-pressed="${fav}"><svg><use href="#i-heart"/></svg></button></div>`
   b.querySelector('.cover-btn').onclick = (e) => {
     if (e.target.closest('.c-del')) {
       e.stopPropagation()
-      if (!confirm(`Remove "${item.title}" from your library?`)) return
-      deleteImported(item.id).then(() => {
-        localStorage.removeItem('lumi.best.' + item.file)
-        localStorage.removeItem('lumi.fav.' + item.file)
-        store.set('lumi.recent', recent().filter((r) => r.file !== item.file))
-        return loadImportedLibrary()
-      }).then(renderRecent)
+      removeImportedSong(item)
       return
     }
     openItem(item)
@@ -1310,27 +1631,127 @@ function sortSongs(list) {
   }
   return [...list].sort(rank ? (a, b) => rank(a) - rank(b) || byTitle(a, b) : byTitle)
 }
+// Level and composer filters on the song list (remembered between runs)
+const FILTER_KEY = 'lumi.libfilter'
+let libFilter = (() => { const f = store.get(FILTER_KEY, {}); return { level: (f && f.level) || '', composer: (f && f.composer) || '' } })()
+let levelChipsKey = ''
+function setFilter(next) {
+  libFilter = { ...libFilter, ...next }
+  store.set(FILTER_KEY, libFilter)
+  renderLibrary()
+}
+function clearFilters() {
+  searchTerm = ''; $('search').value = ''
+  setFilter({ level: '', composer: '' })
+}
+function renderLevelChips(levels) {
+  const host = $('levelChips')
+  const key = levels.join('|')
+  if (key !== levelChipsKey) {
+    levelChipsKey = key
+    host.replaceChildren(...['', ...levels].map((l) => {
+      const b = document.createElement('button')
+      b.type = 'button'; b.dataset.level = l; b.textContent = l || 'All levels'
+      b.onclick = () => setFilter({ level: l && l === libFilter.level ? '' : l })
+      return b
+    }))
+  }
+  for (const b of host.children) { const on = b.dataset.level === libFilter.level; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)) }
+}
+let composerList = []
+function renderComposerList() {
+  const q = $('composerSearch').value.trim().toLowerCase()
+  const rows = [{ name: '', label: 'All composers', count: allSongs().length }, ...composerList.map((c) => ({ ...c, label: c.name }))]
+    .filter((r) => !q || r.label.toLowerCase().includes(q))
+  const host = $('composerList')
+  host.replaceChildren(...rows.map((r) => {
+    const b = document.createElement('button')
+    b.type = 'button'; b.setAttribute('role', 'option'); b.tabIndex = -1; b.dataset.composer = r.name
+    b.setAttribute('aria-selected', String(r.name === libFilter.composer))
+    b.innerHTML = `<span>${escapeHtml(r.label)}</span><small>${r.count}</small>`
+    b.onclick = () => { closeComposerMenu(true); setFilter({ composer: r.name }) }
+    return b
+  }))
+  if (!rows.length) { const p = document.createElement('p'); p.className = 'comp-none'; p.textContent = 'No composer matches'; host.appendChild(p) }
+}
+const composerMenuOpen = () => !$('composerPop').classList.contains('hidden')
+function openComposerMenu() {
+  $('composerSearch').value = ''
+  renderComposerList()
+  $('composerPop').classList.remove('hidden')
+  $('composerBtn').setAttribute('aria-expanded', 'true')
+  $('composerSearch').focus()
+}
+function closeComposerMenu(focusButton) {
+  if (!composerMenuOpen()) return
+  $('composerPop').classList.add('hidden')
+  $('composerBtn').setAttribute('aria-expanded', 'false')
+  if (focusButton) $('composerBtn').focus()
+}
+function wireComposerMenu() {
+  $('composerBtn').onclick = () => (composerMenuOpen() ? closeComposerMenu(true) : openComposerMenu())
+  $('composerSearch').oninput = renderComposerList
+  $('composerPop').addEventListener('keydown', (e) => {
+    const opts = [...$('composerList').querySelectorAll('[role="option"]')]
+    const i = opts.indexOf(document.activeElement)
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComposerMenu(true) }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!opts.length) return
+      const next = e.key === 'ArrowDown' ? i + 1 : i - 1
+      if (next < 0) $('composerSearch').focus()
+      else opts[Math.min(next, opts.length - 1)].focus()
+    } else if (e.key === 'Enter' && document.activeElement === $('composerSearch')) {
+      e.preventDefault()
+      const pick = opts.find((o) => o.dataset.composer)
+      if (pick) pick.click()
+    }
+    else if (e.key === 'Tab') closeComposerMenu(false)
+  })
+  document.addEventListener('pointerdown', (e) => { if (composerMenuOpen() && !$('composerWrap').contains(e.target)) closeComposerMenu(false) }, true)
+  $('clearFilters').onclick = clearFilters
+}
+
 function renderLibrary() {
   const grid = $('libraryGrid')
   grid.replaceChildren()
   // the Imported chip shows once there is something in it (or while it is the one chosen)
   const hasImported = importedSongs.length > 0
-  let lib = allSongs().filter((i) => !searchTerm || [i.title, i.artist, i.genre, i.level].join(' ').toLowerCase().includes(searchTerm))
+  const everything = allSongs()
+  const levels = levelsPresent(everything, LEVELS)
+  composerList = composersOf(everything)
+  const safe = cleanFilter(libFilter, levels, composerList)
+  if (safe.level !== libFilter.level || safe.composer !== libFilter.composer) { libFilter = safe; store.set(FILTER_KEY, libFilter) }
+  let lib = everything.filter((i) => !searchTerm || [i.title, i.artist, i.genre, i.level].join(' ').toLowerCase().includes(searchTerm))
   if (searchChip === 'fav') lib = lib.filter((i) => isFav(i.file))
   if (searchChip === 'imported') lib = lib.filter((i) => i.imported)
+  lib = applyFilter(lib, libFilter)
   for (const item of sortSongs(lib)) grid.appendChild(coverTile(item))
   const rail = $('songRail')
-  if (rail) { rail.replaceChildren(); for (const item of allSongs()) rail.appendChild(coverTile(item)) }
+  if (rail) { rail.replaceChildren(); for (const item of everything) rail.appendChild(coverTile(item)) }
   const showSongs = searchChip === 'songs' || searchChip === 'fav' || searchChip === 'imported'
   grid.classList.toggle('hidden', !showSongs)
   $('lessonList').classList.toggle('hidden', searchChip !== 'lessons')
   $('searchGames').classList.toggle('hidden', searchChip !== 'games')
-  $('searchEmpty').classList.toggle('hidden', !(showSongs && !lib.length))
-  $('searchEmpty').textContent = searchChip === 'fav' ? 'Tap the heart on a song to keep it here.' : searchChip === 'imported' ? 'Songs you add show up here.' : 'No songs match that search.'
+  const filterOn = !!(libFilter.level || libFilter.composer)
+  const noMatch = showSongs && !lib.length
+  const offerClear = noMatch && (filterOn || !!searchTerm)
+  $('searchEmpty').classList.toggle('hidden', !noMatch)
+  $('searchEmptyActions').classList.toggle('hidden', searchChip === 'fav' || offerClear)
+  $('searchEmptyClear').classList.toggle('hidden', !offerClear)
+  $('searchEmptyText').textContent = offerClear ? (filterOn ? 'No songs match these filters.' : 'No songs match that search.')
+    : searchChip === 'fav' ? 'Tap the heart on a song to keep it here.' : searchChip === 'imported' ? 'Songs you add show up here.' : 'No songs match that search.'
   for (const c of document.querySelectorAll('#searchChips button')) {
     c.classList.toggle('on', c.dataset.chip === searchChip)
     if (c.dataset.chip === 'imported') c.classList.toggle('hidden', !hasImported && searchChip !== 'imported')
   }
+  $('filterBar').classList.toggle('hidden', !showSongs)
+  renderLevelChips(levels)
+  $('composerLabel').textContent = libFilter.composer || 'All'
+  $('composerBtn').classList.toggle('active', !!libFilter.composer)
+  $('libCount').textContent = countLabel(lib.length)
+  $('clearFilters').classList.toggle('hidden', !(filterOn || searchTerm))
+  if (composerMenuOpen()) renderComposerList()
   $('sortLabel').textContent = SORT_LABELS[sortMode] || SORT_LABELS.title
   $('sortBtn').classList.toggle('hidden', !showSongs)
   renderToolbox()
@@ -1342,7 +1763,10 @@ function renderRecent() {
   const list = $('recentList')
   list.replaceChildren()
   const items = recent()
-  if (!items.length) { list.innerHTML = '<div class="empty" style="padding:20px 0">Songs you play show up here.</div>'; return }
+  if (!items.length) {
+    list.innerHTML = '<div class="empty empty-recent"><span>Songs you play show up here.</span><div class="empty-actions"><button class="mini-btn is-primary" data-empty="recent">Pick a song</button></div></div>'
+    return
+  }
   for (const r of items) {
     const item = findSong(r.file)
     if (item) list.appendChild(coverTile(item))
@@ -1359,11 +1783,23 @@ function updateHome() {
   $('continueKicker').textContent = r ? 'Continue learning' : 'Start here'
   $('continueTitle').textContent = item.title
   const best = bestFor(item.file)
-  $('continueSub').textContent = `${item.artist} · ${best ? best + ' of 5 stars' : 'Not played yet'}`
+  $('continueSub').innerHTML = `${escapeHtml(item.artist)}<span class="hero-meta">${best ? best + ' of 5 stars' : 'Not played yet'}</span>`
   $('continueArt').innerHTML = itemCover(item, { stars: best })
   $('continuePlay').onclick = () => openItem(item)
   $('continuePractise').onclick = () => openItem(item).then(() => setMode('PRACTISE'))
+  // first run: Start here leads into the course's first lesson
+  if (!r && !Object.keys(course.progress.lessons).length) {
+    const first = COURSE.levels[0].lessons[0]
+    $('continueTitle').textContent = first.title
+    $('continueSub').innerHTML = `${escapeHtml(first.goal)}<span class="hero-meta">Lesson 1 of the piano course · ${first.minutes} min</span>`
+    $('continuePlay').lastChild.textContent = 'Start lesson 1'
+    $('continuePlay').onclick = () => course.openStep()
+    $('continuePractise').classList.add('hidden')
+  } else { $('continuePlay').lastChild.textContent = 'Play'; $('continuePractise').classList.remove('hidden') }
+  course.refreshHome()
   renderRecent()
+  renderPracticeRail()
+  updateGoal()
 }
 
 /* ============================== games ============================== */
@@ -1421,30 +1857,83 @@ function askQuiz(now = performance.now()) {
   quiz.askedAt = now
   showQuizQuestion()
 }
-function startQuiz(g) {
+function startQuiz(g, run = null) {
   initAudio()
-  quiz = { game: g, score: 0, until: performance.now() + ROUND_SECONDS * 1000, q: null, askedAt: 0, over: false }
+  courseRun = run ? { ownerId: run.ownerId, item: run.item } : null
+  quiz = { game: g, score: 0, wrong: 0, rounds: run ? run.rounds : 0, course: !!run, until: performance.now() + ROUND_SECONDS * 1000, q: null, askedAt: 0, over: false }
   $('quizAgain').classList.add('hidden')
-  $('quizAgain').onclick = () => startQuiz(g)
+  $('quizBack').classList.add('hidden')
+  $('quizAgain').onclick = () => startQuiz(g, run)
   showScreen('quiz')
+  mountQuizPad()
+  courseRun = run ? { ownerId: run.ownerId, item: run.item } : null
   $('title').textContent = g.name
-  $('subtitle').textContent = 'Games · one minute'
+  $('subtitle').textContent = run ? `Course · ${run.rounds} right answers, one minute` : 'Games · one minute'
   askQuiz()
   updateQuiz()
 }
+// Touch screens get a one-octave keyboard under the question (every game accepts the note in any octave), so a game is
+// playable without a MIDI keyboard. Each finger is its own pointer, so chords and quick runs both work.
+function mountQuizPad() {
+  const host = $('quizPad')
+  const wanted = TOUCH || IS_NATIVE_HOST
+  host.classList.toggle('hidden', !wanted)
+  if (!wanted) { host.replaceChildren(); return }
+  host.innerHTML = padSvg([60, 71], { names: true })
+  const held = new Map()
+  const release = (e) => {
+    const p = held.get(e.pointerId)
+    if (p === undefined) return
+    held.delete(e.pointerId)
+    host.querySelector(`.ex-key[data-p="${p}"]`)?.classList.remove('down')
+    if (![...held.values()].includes(p)) handleNoteOff(p)
+  }
+  host.onpointerdown = (e) => {
+    const k = e.target.closest?.('.ex-key')
+    if (!k || e.button > 0) return
+    e.preventDefault()
+    const p = Number(k.dataset.p)
+    try { k.setPointerCapture(e.pointerId) } catch (_e) { /* not needed */ }
+    held.set(e.pointerId, p)
+    k.classList.add('down')
+    handleNoteOn(p, 96)
+  }
+  host.onpointerup = release
+  host.onpointercancel = release
+}
 function quizPress(pitch, now = performance.now()) {
   if (!quiz || quiz.over || screen !== 'quiz') return
-  if (isRight(quiz.q, pitch)) { quiz.score++; askQuiz(now) }
-  else { $('quizPrompt').classList.add('wrong'); $('quizHelp').textContent = 'Not that one: try again' }
+  if (isRight(quiz.q, pitch)) { quiz.score++; if (quiz.rounds && quiz.score >= quiz.rounds) finishQuiz(); else askQuiz(now) }
+  else { quiz.wrong++; $('quizPrompt').classList.add('wrong'); $('quizHelp').textContent = 'Not that one: try again' }
 }
 function finishQuiz() {
   quiz.over = true
+  if (quiz.course && courseRun) return finishCourseQuiz()
   const stars = starsFor(quiz.score)
   if (stars > gameBest(quiz.game.id)) store.set('lumi.game.' + quiz.game.id, stars)
   $('quizPrompt').classList.remove('wrong')
   $('quizPrompt').textContent = '★'.repeat(stars) + '☆'.repeat(5 - stars)
   $('quizHelp').textContent = quiz.score + (quiz.score === 1 ? ' note' : ' notes') + ' in a minute'
   $('quizAgain').classList.remove('hidden')
+}
+// A note game inside the course: accuracy is right answers over answers given (at least the rounds asked)
+function finishCourseQuiz() {
+  const acc = noteGameAccuracy(quiz.rounds, quiz.score, quiz.wrong)
+  const r = course.record(courseRun.ownerId, courseRun.item, { accuracy: acc, seconds: ROUND_SECONDS })
+  courseRun.passed = r.passed
+  markCalm(r.passed)
+  $('quizPrompt').classList.remove('wrong')
+  $('quizPrompt').textContent = Math.round(acc * 100) + '%'
+  $('quizHelp').textContent = `${quiz.score} right, ${quiz.wrong} wrong · ${r.passed ? 'item passed' : 'aim for ' + passText(courseRun.item)}${r.lessonDone ? ' · lesson complete' : ''}`
+  $('quizAgain').classList.remove('hidden')
+  const next = course.nextAction(courseRun.ownerId, courseRun.item.id, r.passed)
+  $('quizBack').textContent = next.label
+  $('quizBack').onclick = next.go
+  $('quizBack').classList.remove('hidden')
+  $('quizBack').classList.toggle('primary', next.primary)
+  $('quizBack').classList.toggle('ghost', !next.primary)
+  $('quizAgain').classList.toggle('primary', !next.primary)
+  $('quizAgain').classList.toggle('ghost', next.primary)
 }
 function updateQuiz(now = performance.now()) {
   if (!quiz || quiz.over) return
@@ -1513,7 +2002,7 @@ const lessonArt = (lesson, idx) => {
   const item = LIBRARY.find((l) => l.file === lesson.file)
   return item ? itemCover(item, { level: false }) : `<div class="cover" style="background:${LESSON_ART[idx % LESSON_ART.length]}"></div>`
 }
-const stepLabel = (step) => (step === 'PLAY' ? 'Challenge' : step === 'PRACTISE' ? 'Practise' : 'Watch')
+const stepLabel = (step) => (step === 'PLAY' ? 'Challenge' : step === 'PRACTISE' ? 'Practice' : 'Watch')
 // The step to open when a lesson card is tapped: the first one not done yet.
 function nextLessonStep(lesson) {
   return LESSON_STEPS.find((st) => !lessonStepDone(lesson.id, st)) || 'PLAY'
@@ -1722,16 +2211,209 @@ function startExercise() {
   status(song.windows ? 'Left hand first, then the keys move up for the right — press Play' : 'Exercise ready — press Play')
 }
 
+/* ============================== course items ============================== */
+// The course hands an item here to play it. Toolbox exercises and pieces run in the practice
+// player, note games in the quiz screen; onFinish / finishQuiz report the result to the course.
+function runCourseItem(item, ctx) {
+  const p = item.params
+  const run = { ownerId: ctx.ownerId, item }
+  try {
+    if (item.type === 'notegame') {
+      const g = NOTE_GAMES.find((x) => x.id === p.game)
+      if (!g) throw new Error('unknown game ' + p.game)
+      return startQuiz(g, { ...run, rounds: p.rounds || 10 })
+    }
+    if (item.type === 'piece') return startCoursePiece(run)
+    if (EXERCISE_TYPES.has(item.type)) return startCourseExercise(run)
+    if (PLAYER_TYPES.has(item.type)) {
+      Object.assign(tb, { type: p.tb.type, tonic: p.tb.tonic, hand: p.tb.hand })
+      startExercise()
+      courseRun = run
+      $('title').textContent = item.title
+      $('subtitle').textContent = 'Course · aim for ' + passText(item)
+      return
+    }
+    status('That kind of exercise is coming soon')
+  } catch (e) { status('Could not start: ' + e.message) }
+}
+// echo, rhythm, ear and sight run on their own screen. Every note you play (MIDI, the on-screen keys, the
+// computer keys) comes through handleNoteOn, which hands it to exercise.input; the sound it makes there
+// is the normal key sound. The caller supplies the host: what saves the result, the labels, where Back goes.
+// The course saves with course.record (below); Practice saves into 'lumi.practice' only (startPracticeExercise).
+function startCourseExercise(run) {
+  const { item, ownerId } = run
+  courseExerciseRun = run
+  practiceRun = null
+  mountExerciseScreen(item, {
+    title: course.ownerTitle(ownerId),
+    record: (r) => { const res = course.record(ownerId, item, r); markCalm(res && res.passed); return res },
+    next: (passed) => course.nextAction(ownerId, item.id, passed),
+    back: () => course.openOwner(ownerId)
+  })
+}
+function mountExerciseScreen(item, host) {
+  initAudio()
+  showScreen('exercise')
+  const ctxNow = () => { const c = audioContext(); return c ? c.currentTime : 0 }
+  const deps = {
+    now: () => performance.now(),
+    press: (p) => handleNoteOn(p, 90, 0),
+    release: (p) => handleNoteOff(p, 0),
+    schedule: (p, vel, off, dur) => { if (audioContext()) scheduleNote(p, vel, ctxNow() + Math.max(0.01, off), dur) },
+    click: (accent, delay) => { if (audioContext()) click(accent, ctxNow() + Math.max(0, delay)) },
+    stopSound: () => { cancelScheduled(); cancelClicks() },
+    latencyMs: () => Math.min(200, Math.round((latencyInfo().output || 0) * 1000))
+  }
+  exercise = mountExercise($('screen-exercise'), { item, deps, host })
+  $('screen-exercise').scrollTop = 0
+}
+
+/* ============================== practice ============================== */
+// The Practice tab: Playground, the four exercises as stand-alone rounds, Scales & chords, Games and a metronome.
+// A Practice round runs on the same exercise screen as the course, with its own host: the result goes to
+// 'lumi.practice' and nothing else. It never sets courseRun or courseExerciseRun, which every course.record
+// call site depends on, and it never calls course.record.
+const practiceStats = () => parseStats(store.get(STATS_KEY, null))
+const savePracticeStats = (stats) => store.set(STATS_KEY, stats)
+function startPracticeExercise(activity, level) {
+  const item = activity.makeItem(level, Math.random)
+  courseExerciseRun = null
+  practiceRun = { activity, level, item }
+  let last = 0
+  const back = () => showScreen('practice')
+  mountExerciseScreen(item, {
+    title: 'Back to Practice',
+    againLabel: 'Again',
+    record: ({ accuracy }) => {
+      last = accuracy
+      savePracticeStats(recordResult(practiceStats(), activity.id, level, accuracy, Date.now()))
+      return { passed: accuracy >= (item.passAt.accuracy ?? 0.8) }
+    },
+    next: () => (last >= HARDER_AT && level < activity.levels
+      ? { label: 'Harder', primary: true, go: () => startPracticeExercise(activity, level + 1) }
+      : { label: 'Back to Practice', primary: false, go: back }),
+    back
+  })
+}
+// The Jam screen's connections to the app. Keyboard notes reach it through handleNoteOn/handleNoteOff/handleMidiMessage
+// (routeToJam), lights through jamLit (read by idleNoteLights and restFrame), saving through the same store as everything else.
+function jamDeps() {
+  const lit = framesDrive() || (noteLightsOnly() && !!midiOutput)
+  return {
+    audio: { audioContext, initAudio, createTrack, jamFx, click, instrumentList, sampledPianoStatus, cancelClicks },
+    store,
+    lights: lit ? { show: (pitches) => { jamLit = new Set(pitches) }, clear: () => { jamLit = new Set() } } : null,
+    exit: () => { nav.back() },
+    download: (name, bytes, mime) => downloadFile(new Blob([bytes], { type: mime }), name)
+  }
+}
+const routeToJam = () => screen === 'jam' && !!jamUi
+// The keys of the keyboard Jam's scale lock lights (and only those the keyboard has).
+function jamLitPitches() {
+  if (!jamLit.size || screen !== 'jam') return []
+  const base = kbBase(), end = base + kbKeys()
+  return [...jamLit].filter((p) => p >= base && p < end)
+}
+// One launch callback per 'screen' activity of the registry; the registry entry names it by id.
+const PRACTICE_SCREENS = {
+  playground: () => startFreeplay(),
+  toolbox: () => showScreen('toolbox'),
+  games: () => showScreen('games'),
+  jam: () => { initAudio(); showScreen('jam') },
+  metronome: () => {
+    showScreen('practice')
+    const panel = document.querySelector('.pr-metro')
+    if (panel) {
+      panel.scrollIntoView({ block: 'center' })
+      panel.querySelector('button')?.focus()
+    }
+  }
+}
+function launchPractice(activity, level = 0) {
+  if (screen !== 'practice') showScreen('practice', { tab: true })      // Back from the round lands on the Practice tab
+  if (activity.kind === 'exercise') return startPracticeExercise(activity, level || suggestLevel(practiceStats(), activity.id))
+  const go = PRACTICE_SCREENS[activity.id]
+  if (!go) return status(activity.title + ' is not available yet')
+  savePracticeStats(recordUse(practiceStats(), activity.id, Date.now()))
+  go()
+}
+practiceUi = mountPractice($('screen-practice'), {
+  activities: ACTIVITIES,
+  getStats: () => store.get(STATS_KEY, null),
+  setStats: savePracticeStats,
+  launch: launchPractice,
+  audio: { init: initAudio, now: () => { const c = audioContext(); return c ? c.currentTime : 0 }, click, cancelClicks }
+})
+function renderPracticeRail() {
+  const list = $('practiceRailList')
+  if (!list) return
+  const stats = practiceStats()
+  list.replaceChildren(...railPicks(stats, 4).map((a) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'pr-chip'
+    b.dataset.id = a.id
+    const t = document.createElement('b'); t.textContent = a.title
+    const d = document.createElement('span'); d.textContent = a.kind === 'exercise' ? `${a.blurb} Level ${suggestLevel(stats, a.id)} next.` : a.blurb
+    b.append(t, d)
+    b.onclick = () => launchPractice(a)
+    return b
+  }))
+}
+async function startCoursePiece(run) {
+  const { item } = run, p = item.params
+  initAudio()
+  let s, meta = null
+  if (p.song) {
+    // lessons name a registered library id; a raw file path from older data still opens
+    meta = LIBRARY.find((l) => l.id === p.song || l.file === p.song) || null
+    const file = meta ? meta.file : /\.(xml|musicxml|midi?)$/i.test(p.song) ? p.song : null
+    if (!file) { status('That piece is not in the library: ' + p.song); return }
+    try { s = await loadSongFile(await fetchLibraryFile(file)) } catch (e) { status('Could not load the piece: ' + e.message); return }
+    if (meta && meta.tempoScale) applyTempoScale(s, meta.tempoScale)   // the library's default tempo (docs/SONG-TEMPOS.md)
+  } else s = buildPieceSong(p, item.title)
+  resetSession()
+  song = s
+  song.file = ''                    // not a library song: no best score, sheet or guided practice for it
+  if (meta && meta.licence) { song.credit = mutopiaCredit(meta); song.creditSource = meta.source; song.heavy = !!meta.heavy }
+  song.title = item.title
+  song.artist = 'Course'
+  player = new Player({ getCtx: audioContext, onState: onPlayerState, onJudgement: onJudgement, onFinish: onFinish })
+  loadIntoPlayer(song)
+  player.setMode('PRACTISE')
+  player.setAdvancement(settings.waitMode || 'pauseAndSnap')
+  player.setCountIn(settings.countIn)
+  player.setMetronome(settings.metronome)
+  player.setView(settings.view)
+  player.setNoteLabels(settings.labels)
+  player.setHandFilter(pieceHand(p))
+  if (p.from != null && p.to != null) player.setSection(p.from, p.to)
+  courseRun = run
+  showScreen('play')
+  courseRun = run
+  $('title').textContent = item.title
+  $('subtitle').textContent = 'Course · aim for ' + passText(item) + (song.credit ? ' · ' + song.credit : '')
+  $('subtitle').title = song.credit ? song.credit + (song.creditSource ? ' (' + song.creditSource + ')' : '') : ''
+  syncHudButtons(); resize()
+  status('Ready: press Play. The keys wait for you in Practice')
+}
+
 /* ============================== song loading ============================== */
+// A built-in song's file as the loader wants it: MIDI is binary, MusicXML is text
+async function fetchLibraryFile(file) {
+  const res = await fetch('songs/' + file)
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return /\.midi?$/i.test(file) ? { name: file, arrayBuffer: () => res.arrayBuffer() } : { name: file, text: () => res.text() }
+}
 async function openLibrary(file) {
   try {
-    const res = await fetch('songs/' + file)
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    song = await loadSongFile({ name: file, text: () => res.text() })
+    song = await loadSongFile(await fetchLibraryFile(file))
     const meta = LIBRARY.find((l) => l.file === file) || {}
+    if (meta.tempoScale) applyTempoScale(song, meta.tempoScale)   // Mutopia default tempo (docs/SONG-TEMPOS.md)
     song.file = file
     song.title = meta.title || song.title
     song.artist = meta.artist || ''
+    if (meta.licence) { song.credit = mutopiaCredit(meta); song.creditSource = meta.source; song.heavy = !!meta.heavy }
     pushRecent(file)
     startSong()
   } catch (e) { status('Could not load song: ' + e.message) }
@@ -1761,6 +2443,10 @@ async function openFile(file) {
 // Every song, lesson, game or exercise start clears what the last one left behind:
 // free play, game/lesson/exercise state and any light ceremony still running.
 function resetSession({ exercise = null, lesson = null, game = null } = {}) {
+  guided.reset()
+  performanceControls?.panic()
+  cameraCoach?.reset()
+  $('editSong').disabled = true
   endTake('another song')
   takeDeclined = null
   mediaToken++
@@ -1774,6 +2460,7 @@ function resetSession({ exercise = null, lesson = null, game = null } = {}) {
   hideSheet()
   freeplay = false
   exerciseMeta = exercise
+  courseRun = null
   lessonMeta = lesson
   gameMeta = game
   cancelCeremony()
@@ -1794,6 +2481,7 @@ function loadIntoPlayer(song) {
 }
 
 function startSong() {
+  cancelLightTest()
   resetSession()
   initAudio()
   applySongMedia(song)
@@ -1815,11 +2503,14 @@ function startSong() {
   bandEvents = computeBand(song); resetBand(0)
   showScreen('play')
   $('title').textContent = song.title
-  $('subtitle').textContent = `${song.artist || ''} · ${song.notes.length} notes`
+  $('subtitle').textContent = `${song.artist || ''} · ${song.notes.length} notes${song.credit ? ' · ' + song.credit : ''}${song.heavy ? ' · long piece' : ''}`
+  $('subtitle').title = song.credit ? song.credit + (song.creditSource ? ' (' + song.creditSource + ')' : '') : ''
   applySheet()
   syncHudButtons()
   resize()
   status(missing ? noHandPart(settings.hands) : song.source === 'audio' ? 'Ready — the recording plays along. Press Play' : 'Ready — press Play')
+  guided.onSongLoaded()
+  $('editSong').disabled = false
 }
 
 // Sheet music, for a song that has a score: only a song played from the library (a lesson, game
@@ -1827,34 +2518,51 @@ function startSong() {
 // written score to show.
 const sheet = new SheetStrip($('sheetStrip'), $('sheetMusic'))
 let sheetErrorLogged = false
-const songHasSheet = () => !!(song && song.score && player && !freeplay && !lessonMeta && !gameMeta && !exerciseMeta)
+const songHasSheet = () => !!(song && song.score && player && !freeplay && !lessonMeta && !gameMeta && !exerciseMeta && !courseRun)
 function applySheet() {
   const has = songHasSheet()
-  $('btnSheet').classList.toggle('hidden', !has)
-  const on = has && settings.sheet
-  const box = $('sheetStrip')
-  if (box.classList.contains('hidden') === on) {
-    box.classList.toggle('hidden', !on)
-    resize()
+  // a plain song without a score keeps the remembered Sheet only view and says why there is nothing to show;
+  // lessons, games, exercises and the Playground have their own steps, so they just fall back
+  const plain = !!(song && player && !freeplay && !lessonMeta && !gameMeta && !exerciseMeta && !courseRun && !song.score)
+  const missing = !has && plain && settings.view === 'SHEET'
+  $('sheetMissing').classList.toggle('hidden', !missing)
+  if (!has && !missing && settings.view === 'SHEET') {
+    settings.view = 'CASCADE'; saveSettings()
+    if (player) player.setView(settings.view)
   }
+  const only = has && settings.view === 'SHEET'
+  $('screen-play').classList.toggle('sheet-only', only)
+  $('btnSheet').classList.toggle('hidden', !has)
+  $('btnSheet').disabled = only
+  const on = has && (settings.sheet || only)
+  const box = $('sheetStrip')
+  box.classList.toggle('sheet-only', only)
+  box.classList.toggle('hidden', !on)
+  resize()
   if (!on) { sheet.cancel(); return }
   sheet.show(song.score).catch((e) => {
     console.log('SHEET could not draw: ' + (e && e.message))
     status('Could not show the sheet music: ' + (e && e.message))
     box.classList.add('hidden')
+    $('screen-play').classList.remove('sheet-only')
+    if (settings.view === 'SHEET') chooseView('CASCADE')
     $('btnSheet').classList.add('hidden')    // for this song: others may draw fine
     resize()
   })
 }
 function hideSheet() {
   sheet.cancel()
+  $('sheetMissing').classList.add('hidden')
+  $('screen-play').classList.remove('sheet-only')
+  $('sheetStrip').classList.remove('sheet-only')
   $('btnSheet').classList.add('hidden')
   if (!$('sheetStrip').classList.contains('hidden')) { $('sheetStrip').classList.add('hidden'); resize() }
 }
 // Per frame, and a failure here must not cost the lights and the HUD that come after it.
-function updateSheet(pos) {
+function updateSheet(snap) {
   if ($('sheetStrip').classList.contains('hidden')) return
-  try { sheet.update(pos) } catch (e) { if (!sheetErrorLogged) { sheetErrorLogged = true; console.log('SHEET update failed: ' + (e && e.message)) } }
+  const due = snap.waiting ? (snap.waitNotes || []).filter((n) => snap.needPitches.has(n.pitch)) : snap.activeNotes
+  try { sheet.update(snap.position, due) } catch (e) { if (!sheetErrorLogged) { sheetErrorLogged = true; console.log('SHEET update failed: ' + (e && e.message)) } }
 }
 
 // An imported recording plays along (in sync with the song clock), its cover
@@ -1951,6 +2659,7 @@ async function startCamera() {
     $('camToggle').textContent = 'Stop camera'
     $('camEmpty').classList.add('hidden')
     $('btnCamera').classList.add('on')
+    $('btnCamera').setAttribute('aria-pressed', 'true')
     refreshCameraList()   // labels appear once permission is granted
     console.log('HANDS camera started')
   } catch (e) {
@@ -1963,6 +2672,7 @@ function stopCamera() {
   $('camToggle').textContent = 'Start camera'
   $('camEmpty').classList.remove('hidden')
   $('btnCamera').classList.remove('on')
+  $('btnCamera').setAttribute('aria-pressed', 'false')
   $('camPip').classList.add('hidden')
   camStatus('Off')
 }
@@ -2003,8 +2713,8 @@ function runLightTest() {
   if (!daemon || !daemon.ready) {
     // without the light service the keyboard lights keys from MIDI notes: switch those off
     if (midiOutput) { clearLights(midiOutput); litNotes.clear(); litRoutes.clear() }
-    status(daemonState === 'no-device' ? 'The light service has not found your keyboard: check it is plugged in over USB and switched on'
-      : 'The light service is not running, so the lights cannot be tested')
+    if (daemonState === 'no-device') status('The light service has not found your keyboard: check it is plugged in over USB and switched on. ' + noKeyboardNextStep(), keyboardSettingsAction())
+    else status('The light service is not running, so the lights cannot be tested')
     return
   }
   // camera set-up lights one key at a time to find them; a sweep would spoil it
@@ -2017,8 +2727,10 @@ function runLightTest() {
   const done = at(frames.length - 1) + 150
   ledOverrideUntil = performance.now() + done + 100
   ceremonyTimers = frames.map((fr, i) => setTimeout(() => { if (daemon && daemon.ready) daemon.send(fr) }, at(i)))
+  lightTestActive = true
   ceremonyTimers.push(setTimeout(() => {
     ledOverrideUntil = 0
+    lightTestActive = false
     if (daemon) daemon.lastSig = ''      // resend the current picture even if it matches the last frame
     status('Light test done: every key should have lit up, and stuck lights are cleared')
   }, done))
@@ -2026,12 +2738,12 @@ function runLightTest() {
   const btn = $('testLights')
   btn.disabled = true
   btn.textContent = 'Testing…'
-  setTimeout(() => { btn.disabled = false; btn.textContent = 'Test lights' }, done)
+  lightTestTimers.push(setTimeout(() => { btn.disabled = false; btn.textContent = 'Test lights' }, done))
   status('Testing the lights: a light runs across every key and back')
 }
 async function autoCalibrate() {
   if (!cameraOn()) { status('Start the camera first'); return }
-  if (IS_WIN && !(daemon && daemon.ready)) { status('Finding the keys needs colour key lights, which Windows does not have yet: use Click the end keys'); return }
+  if ((IS_WIN || IS_NATIVE_HOST) && !(daemon && daemon.ready)) { status('Finding the keys automatically needs full-colour lighting. Use Click the end keys instead.'); return }
   if (!daemon || !daemon.ready) { status('The keyboard lights are needed to find the keys'); return }
   cancelCeremony()
   ledOverrideUntil = performance.now() + 4000
@@ -2074,9 +2786,10 @@ function drawCamera(canvas) {
 // Fingers over the on-screen keys: { pitch -> { side, finger } }, from the camera.
 function fingerHover(geo) {
   const out = new Map()
-  if (!cameraOn() || !tracker.calib || !geo || !geo.keys || !geo.keys.length) return out
+  const src = airSource?.selected() ? airSource.tracker : cameraOn() ? tracker : null
+  if (!src || !src.calib || !geo || !geo.keys || !geo.keys.length) return out
   const k0 = geo.keys[0], kN = geo.keys[geo.keys.length - 1]
-  for (const f of tracker.fingertipsOverKeys(0.12 * 24 / kbKeys())) {
+  for (const f of src.fingertipsOverKeys(0.12 * 24 / kbKeys())) {
     const x = k0.cx + f.t * (kN.cx - k0.cx)
     // nearest key; a black key only when the tip is close to its centre
     let best = null, bestD = Infinity
@@ -2373,6 +3086,7 @@ function writeDeviceConfig(items) {
   configTimers.push(setTimeout(() => { if (daemon && daemon.ready) daemon.configGet() }, 900 + 120 * entries.length))
 }
 function applyDeviceMode() {
+  guardApiMode()
   if (!daemon || !daemon.ready) return
   configAttempts = 0
   writeDeviceConfig(desiredDeviceConfig())
@@ -2441,6 +3155,7 @@ function noteRoute(pitch) {
 const NOTE_DIM = 128            // in updateNoteLights' map: this key is the dim kind (poly aftertouch sets its level)
 const NOTE_DIM_LEVEL = 30
 function updateNoteLights(desired) {
+  guardApiMode()
   if (!midiOutput && !midiOutput2) return
   for (const [pitch, vel] of desired) {
     const prev = litNotes.get(pitch)
@@ -2448,19 +3163,29 @@ function updateNoteLights(desired) {
     const was = litRoutes.get(pitch), route = was || noteRoute(pitch)
     if (!route) continue
     try {
-      if (vel >= NOTE_DIM || prev >= NOTE_DIM) route[0].send([0xa0, route[1], vel >= NOTE_DIM ? NOTE_DIM_LEVEL : 127])
-      route[0].send([0x90, route[1], vel & 0x7f])
+      if (vel & EXACT_FLAG) {                       // true per-key colour: the keyboard's API lighting mode
+        const port = route[0]
+        if (!apiModePorts.has(port)) { beginApiMode(port); setLightingMode(port, LIGHTING_MODE.playingSong, 1); apiModePorts.add(port) }
+        setKeyOn(port, route[1], 0xff000000 | (vel & 0xffffff))
+      } else {
+        if (prev & EXACT_FLAG) setKeyOff(route[0], route[1])
+        if (vel >= NOTE_DIM || prev >= NOTE_DIM) route[0].send([0xa0, route[1], vel >= NOTE_DIM ? NOTE_DIM_LEVEL : 127])
+        route[0].send([0x90, route[1], vel & 0x7f])
+      }
     } catch (_e) {}
     litNotes.set(pitch, vel)
     litRoutes.set(pitch, route)
   }
   for (const pitch of [...litNotes.keys()]) {
     if (desired.has(pitch)) continue
-    const route = litRoutes.get(pitch)
+    const route = litRoutes.get(pitch), note = litNotes.get(pitch)
     if (route) {
       try {
-        route[0].send([0x80, route[1], 0])
-        if (litNotes.get(pitch) >= NOTE_DIM) route[0].send([0xa0, route[1], 127])
+        if (note & EXACT_FLAG) setKeyOff(route[0], route[1])
+        else {
+          route[0].send([0x80, route[1], 0])
+          if (note >= NOTE_DIM) route[0].send([0xa0, route[1], 127])
+        }
       } catch (_e) {}
     }
     litNotes.delete(pitch)
@@ -2474,7 +3199,7 @@ function updateNoteLights(desired) {
 const blankedPorts = new Map()   // port -> when it was last told
 const OWN_COLOURS_RESEND_MS = 10000
 function syncOwnColours(now = performance.now()) {
-  const settling = !IS_WIN && now < 4000
+  const settling = !(IS_WIN || IS_NATIVE_HOST) && now < 4000
   const want = framesDrive() || settling ? [] : [midiOutput, midiOutput2].filter(Boolean)
   for (const port of [...blankedPorts.keys()]) {
     if (want.includes(port)) continue
@@ -2491,10 +3216,26 @@ function syncOwnColours(now = performance.now()) {
 }
 window.addEventListener('pagehide', () => {
   clearNoteLights()
+  leaveApiMode()
   for (const port of blankedPorts.keys()) { try { restoreOwnColours(port) } catch (_e) {} }
   blankedPorts.clear()
 })
-const noteLightColour = (rgb) => velocityForColour(rgb)
+// Exact colours: instead of a note velocity (which the keyboard maps to its own palette), the
+// value carries the colour itself, top bit 1. Only with plain MIDI notes (no light service).
+const EXACT_FLAG = 1 << 24
+const noteLightColour = (rgb) => settings.exactColors && noteLightsOnly()
+  ? EXACT_FLAG | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]
+  : velocityForColour(rgb)
+const asNext = (v) => (v & EXACT_FLAG ? v : v | NOTE_DIM)   // exact next-notes are already coloured
+const apiModePorts = new Set()   // ports in API lighting mode (exact colours)
+const exactWanted = () => !!(settings.exactColors && noteLightsOnly() && !framesDrive())
+function guardApiMode() { if (apiModePorts.size && !exactWanted()) { leaveApiMode(); clearNoteLights() } }
+function leaveApiMode() {
+  for (const port of apiModePorts) {
+    try { turnOffAllKeys(port); setLightingMode(port, LIGHTING_MODE.default, 1); endApiMode(port) } catch (_e) {}
+  }
+  apiModePorts.clear()
+}
 // Blue rather than a dimmer white: Piano's next key has to read as different even on a keyboard
 // that doesn't dim single keys.
 const nextNoteColour = (n, style) => (style === 'Piano' ? [64, 139, 248] : noteRgb(n, style))
@@ -2505,6 +3246,7 @@ function addHeldNoteLights(desired) {
   for (const pitch of held) if (!desired.has(pitch)) desired.set(pitch, noteLightColour(pressRgb(pitch, pitch - base)))
 }
 function clearNoteLights() {
+  leaveApiMode()
   for (const route of litRoutes.values()) { try { route[0].send([0x80, route[1], 0]) } catch (_e) {} }
   litNotes.clear()
   litRoutes.clear()
@@ -2535,8 +3277,26 @@ function midiLightSweep(port = midiOutput) {
   }
   return MIDI_SWEEP_MS
 }
+// A light test in progress (Settings, or the device wizard's lights check) stops at once when the
+// wizard closes or music starts: its timers, the sweep and any key it left lit.
+let lightTestActive = false, lightTestTimers = []
+function cancelLightTest() {
+  if (!lightTestActive) return false
+  lightTestActive = false
+  for (const t of lightTestTimers) clearTimeout(t)
+  lightTestTimers = []
+  cancelCeremony()
+  midiLightSweep(null)
+  for (const out of [midiOutput, midiOutput2]) if (out) clearLights(out)
+  litNotes.clear(); litRoutes.clear()
+  if (daemon) daemon.lastSig = ''
+  const btn = $('testLights')
+  if (btn) { btn.disabled = false; btn.textContent = 'Test lights' }
+  return true
+}
 function runMidiLightTest() {
-  if (!midiOutput) { status(!midiInput ? 'No keyboard found: plug it in over USB and switch it on' : canChooseLights() ? 'Choose your keyboard by name in Settings to light its keys' : 'Keylight doesn’t recognise this keyboard, so its keys stay unlit'); return }
+  if (!midiOutput) { if (!midiInput) { status('No keyboard found: plug it in over USB and switch it on. ' + noKeyboardNextStep(), keyboardSettingsAction()); return }
+    status(canChooseLights() ? 'Choose your keyboard by name in Settings to light its keys' : 'Keylight doesn’t recognise this keyboard, so its keys stay unlit', canChooseLights() ? undefined : supportDeviceAction()); return }
   clearLights(midiOutput)
   if (midiOutput2) clearLights(midiOutput2)
   litNotes.clear()
@@ -2545,13 +3305,15 @@ function runMidiLightTest() {
   const btn = $('testLights')
   btn.disabled = true
   btn.textContent = 'Testing…'
-  setTimeout(() => {
+  lightTestActive = true
+  lightTestTimers.push(setTimeout(() => {
+    lightTestActive = false
     if (midiOutput) { clearLights(midiOutput); litNotes.clear(); litRoutes.clear() }
     if (midiOutput2) clearLights(midiOutput2)
     btn.disabled = false
     btn.textContent = 'Test lights'
     status('Light test done: every key should have lit up, and stuck lights are cleared')
-  }, ms + 150)
+  }, ms + 150))
   status('Testing the lights: a light runs across every key')
 }
 
@@ -2567,7 +3329,7 @@ function togglePlay() {
   if (!player) { if (song) return startSong(); return }
   initAudio()
   if (player.active) { player.pause(); stopBacking() }
-  else { cancelCeremony(); player.play(); syncBacking() }
+  else { cancelLightTest(); cancelCeremony(); player.play(); syncBacking() }
   pumpAudio()
   syncHudButtons()
 }
@@ -2604,15 +3366,6 @@ function toggleSetting(name) {
   if (player) player.setMetronome(settings.metronome)
   syncHudButtons()
 }
-function cycleInstrument() {
-  const list = instrumentList()
-  const i = list.findIndex((x) => x.id === settings.instrument)
-  const next = list[(i + 1) % list.length]
-  settings.instrument = next.id; saveSettings()
-  setInstrument(next.id)
-  syncHudButtons()
-  status('Instrument: ' + next.name)
-}
 function cycleLabels() {
   const i = NOTE_LABELS.indexOf(settings.labels)
   settings.labels = NOTE_LABELS[(i + 1) % NOTE_LABELS.length]; saveSettings()
@@ -2641,12 +3394,13 @@ function cycleHands() {
   if (skipped) status(noHandPart(skipped))
 }
 // Note view picker: a popover under the View button
-// with the four views, a glyph and a line each. Choosing one applies it as cycling used to.
+// with each view, a glyph and a line describing it.
 const VIEW_INFO = {
   CASCADE: { name: 'Cascade', desc: '3D perspective', glyph: '<path d="M3.5 20.5 9 3.5M20.5 20.5 15 3.5M12 3.5v17" opacity=".5"/><rect x="9.3" y="7" width="2" height="5" rx="1" fill="currentColor" stroke="none"/><rect x="12.9" y="11.5" width="2.6" height="6.5" rx="1.3" fill="currentColor" stroke="none"/>' },
   RAINBOW: { name: 'Rainbow', desc: 'A colour per note', glyph: '<rect x="3.5" y="9" width="3.2" height="10" rx="1.6" fill="#ff6b6b" stroke="none"/><rect x="8" y="4.5" width="3.2" height="9" rx="1.6" fill="#ffce48" stroke="none"/><rect x="12.6" y="11" width="3.2" height="8.5" rx="1.6" fill="#3dbe74" stroke="none"/><rect x="17.2" y="5.5" width="3.2" height="8" rx="1.6" fill="#3d8bff" stroke="none"/>' },
   COLORNOTE: { name: 'Colornote', desc: 'Note names on the notes', glyph: '<rect x="6.5" y="3" width="11" height="18" rx="5.5" fill="#f47676" stroke="none"/><text x="12" y="15.4" text-anchor="middle" font-size="9" font-weight="700" fill="#151245" stroke="none" font-family="Outfit, sans-serif">C</text>' },
-  CLASSIC: { name: 'Classic', desc: 'Flat lanes', glyph: '<path d="M4.5 3.5v17M9.5 3.5v17M14.5 3.5v17M19.5 3.5v17" opacity=".4"/><rect x="5.6" y="6" width="2.8" height="6.5" rx="1" fill="currentColor" stroke="none"/><rect x="15.6" y="10.5" width="2.8" height="8" rx="1" fill="currentColor" stroke="none"/>' }
+  CLASSIC: { name: 'Classic', desc: 'Flat lanes', glyph: '<path d="M4.5 3.5v17M9.5 3.5v17M14.5 3.5v17M19.5 3.5v17" opacity=".4"/><rect x="5.6" y="6" width="2.8" height="6.5" rx="1" fill="currentColor" stroke="none"/><rect x="15.6" y="10.5" width="2.8" height="8" rx="1" fill="currentColor" stroke="none"/>' },
+  SHEET: { name: 'Sheet only', desc: 'Full sheet music and guiding key lights', glyph: '<use href="#i-sheet"/>' }
 }
 const viewMenuOpen = () => !$('viewMenu').classList.contains('hidden')
 function buildViewMenu() {
@@ -2658,7 +3412,12 @@ function buildViewMenu() {
   for (const b of menu.querySelectorAll('.vm-item')) b.onclick = () => { chooseView(b.dataset.view); closeViewMenu(); $('btnView').focus() }
 }
 function syncViewMenu() {
-  for (const b of $('viewMenu').querySelectorAll('.vm-item')) b.setAttribute('aria-checked', String(b.dataset.view === settings.view))
+  for (const b of $('viewMenu').querySelectorAll('.vm-item')) {
+    b.setAttribute('aria-checked', String(b.dataset.view === settings.view))
+    const unavailable = b.dataset.view === 'SHEET' && !songHasSheet()
+    b.setAttribute('aria-disabled', String(unavailable))
+    b.querySelector('.vm-desc').textContent = unavailable ? 'Open a song with sheet music' : VIEW_INFO[b.dataset.view].desc
+  }
 }
 // below the button, centred on it but kept inside the window; the nub points at the button
 function placeViewMenu() {
@@ -2699,10 +3458,14 @@ function handleViewMenuKey(e) {
   }
   return i >= 0 && (e.key === 'Enter' || e.code === 'Space')
 }
+$('sheetMissingBack').onclick = () => chooseView('CASCADE')
 function chooseView(view) {
   if (!NOTE_VIEWS.includes(view)) return
+  if (view === 'SHEET' && !songHasSheet()) { status('Sheet only is available for songs with sheet music'); return }
   settings.view = view; saveSettings()
   if (player) player.setView(settings.view)
+  if (view === 'SHEET' && player.clockRunning && sheet.score !== song.score) togglePlay()
+  applySheet()
   syncHudButtons()
 }
 function toggleLoop() {
@@ -2718,21 +3481,22 @@ function toggleLoop() {
 
 function syncHudButtons() {
   const setLbl = (id, v) => { const el = $(id); if (el) el.textContent = v }
-  const inst = instrumentList().find((x) => x.id === settings.instrument)
-  setLbl('lblInst', inst ? inst.short : 'Piano')
+  // toggle buttons carry their on/off state to assistive tech as aria-pressed
+  const setToggle = (id, on) => { const el = $(id); if (!el) return; el.classList.toggle('on', on); el.setAttribute('aria-pressed', String(!!on)) }
+  if (instrumentControls) instrumentControls.sync()
   if ($('voiceCount')) $('voiceCount').textContent = String(activeVoiceCount())
-  $('btnMetro').classList.toggle('on', settings.metronome)
-  $('btnSheet').classList.toggle('on', settings.sheet)
+  setToggle('btnMetro', settings.metronome)
+  setToggle('btnSheet', settings.sheet || settings.view === 'SHEET')
   setLbl('lblLabels', settings.labels === 'names' ? 'Names' : settings.labels === 'fingers' ? 'Fingers' : 'Labels')
-  $('btnLabels').classList.toggle('on', settings.labels !== 'off')
+  setToggle('btnLabels', settings.labels !== 'off')
   // the hand actually in use: a lesson, a game or a song without that part plays both
   const hands = player ? player.handFilter : settings.hands
   setLbl('lblHands', hands === 'both' ? 'Both' : hands === 'left' ? 'Left' : 'Right')
-  $('btnHands').classList.toggle('on', hands !== 'both')
+  setToggle('btnHands', hands !== 'both')
   setLbl('lblView', (VIEW_INFO[settings.view] || VIEW_INFO.CASCADE).name)
   syncViewMenu()
-  $('btnLoop').classList.toggle('on', !!(player && player.loop.on))
-  $('btnWatch').classList.toggle('on', !!(player && player.mode === 'WATCH'))
+  setToggle('btnLoop', !!(player && player.loop.on))
+  setToggle('btnWatch', !!(player && player.mode === 'WATCH'))
   setPlayIcon(!!(player && player.active))
   // speed track thumb
   const sel = player && player.mode === 'PRACTISE' ? 'wait' : String(player ? player.rate : settings.rate)
@@ -2743,6 +3507,9 @@ function syncHudButtons() {
     if (on) onBtn = b
   }
   const thumb = $('speedThumb')
+  if (thumb) thumb.hidden = !onBtn
+  $('customSpeed').hidden = !!onBtn
+  $('customSpeed').textContent = onBtn ? '' : Math.round((player ? player.rate : settings.rate) * 100) + '% speed'
   if (thumb && onBtn && onBtn.offsetWidth) {
     thumb.style.left = (onBtn.offsetLeft - 6) + 'px'
     thumb.style.width = onBtn.offsetWidth + 'px'
@@ -2754,6 +3521,8 @@ function syncHudButtons() {
   if ($('kbdMode')) $('kbdMode').value = settings.keyboardMode
   if ($('exprToggle')) $('exprToggle').checked = !!settings.expression
   if ($('userColorRow')) $('userColorRow').classList.toggle('hidden', settings.keyboardMode !== 'User')
+  if ($('exactColors')) $('exactColors').checked = !!settings.exactColors
+  for (const id of ['exactRow', 'exactHint']) if ($(id)) $(id).classList.toggle('hidden', !noteLightsOnly())
 }
 let playIconState = null
 function setPlayIcon(playing) {
@@ -2789,7 +3558,7 @@ function takeMeta(trigger) {
     mode: freeplay ? 'FREE' : player ? player.mode : null,
     rate: player ? player.rate : 1,
     hands: player ? player.handFilter : 'both',
-    view: freeplay ? 'CASCADE' : settings.view,
+    view: settings.view,
     instrument: currentInstrument(),   // a demo run can play on another than the setting's
     keyboard: { lowest: player ? player.windowStart : kbBase(), keys: kbKeys() }   // the keys on screen
   }
@@ -2866,6 +3635,7 @@ function onJudgement(res) {
 
 function onFinish(summary) {
   stopBacking()
+  if (guided.onFinish(summary)) { endTake('guided step finished'); syncHudButtons(); return }
   // the mode the run was scored in (a mode change part way through carries the score over)
   const mode = summary.mode || (player ? player.mode : 'PLAY')
   if (mode === 'WATCH') {
@@ -2916,9 +3686,24 @@ function onFinish(summary) {
     summary.game = { ...gameMeta, passed, slow }
     renderGames()
   }
+  if (courseRun) {
+    // the score only covers the hand being played: a task that needs both hands is not passed with one
+    const hand = player ? player.handFilter : 'both'
+    if (hand !== 'both' && hand !== requiredHand(courseRun.item)) {
+      courseRun.filtered = true; courseRun.passed = false; courseRun.lessonDone = false
+      status('Not counted: switch Hands to Both for this task')
+    } else {
+      courseRun.filtered = false
+      const r = course.record(courseRun.ownerId, courseRun.item, { accuracy: summary.overallAccuracy, stars: practise ? undefined : summary.starRating, seconds: Math.round(song ? song.duration : 0) })
+      courseRun.passed = r.passed
+      courseRun.lessonDone = r.lessonDone
+      markCalm(r.passed)
+    }
+  }
   const file = song && song.file
   const stars = summary.starRating
   if (file && !practise && !gameMeta && !lessonMeta && !exerciseMeta && stars > (bestFor(file) || 0)) store.set('lumi.best.' + file, stars)
+  if (!practise && !gameMeta && !lessonMeta && !exerciseMeta && stars > 0) markCalm(true)
   showResults(summary)
   // gold stars, or the fail flash; a Practise run without stars gets neither
   if (summary.totalNotes && !(practise && !stars)) celebrate(stars)
@@ -2936,8 +3721,10 @@ function recordPractice(seconds) {
   if (!(seconds > 0)) return
   const days = store.get('lumi.days', {})
   const k = todayKey()
-  days[k] = Math.round((days[k] || 0) + seconds)
+  const before = days[k] || 0
+  days[k] = Math.round(before + seconds)
   store.set('lumi.days', days)
+  if (crossedGoal(before, days[k], settings.goalMin)) goalReached()
   const last = store.get('lumi.streak.last', null)
   let streak = store.get('lumi.streak.count', 0)
   // keys compare as text; a last day after today (the clock went back) is left alone
@@ -2945,6 +3732,32 @@ function recordPractice(seconds) {
     streak = last === yesterdayKey() ? streak + 1 : 1
     store.set('lumi.streak.last', k)
     store.set('lumi.streak.count', streak)
+  }
+}
+// The daily goal ring on Home. Reaching the goal is marked once, gently: a toast now and a soft glow on the ring
+// the next time Home shows. Nothing is lost on a day the goal is missed.
+let goalFresh = false
+function goalReached() {
+  goalFresh = true
+  status('Daily goal reached: ' + settings.goalMin + ' minutes today. Nicely done.')
+}
+function updateGoal() {
+  const ring = $('goalRing')
+  if (!ring) return
+  const g = goalProgress(store.get('lumi.days', {})[todayKey()] || 0, settings.goalMin)
+  $('goalNow').textContent = g.mins
+  $('goalTotal').textContent = g.goal
+  $('goalNote').textContent = g.done ? 'Goal reached' : g.mins ? g.left + ' min to go' : 'today’s goal'
+  ring.classList.toggle('done', g.done)
+  ring.setAttribute('aria-label', 'Daily goal: ' + g.mins + ' of ' + g.goal + ' minutes' + (g.done ? ', reached' : '') + '. Change it in Settings.')
+  const arc = $('goalArc')
+  const target = (g.frac * 100).toFixed(1) + ' 100'
+  const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (calm) arc.style.strokeDasharray = target
+  else { arc.style.strokeDasharray = '0 100'; void arc.getBoundingClientRect(); requestAnimationFrame(() => { arc.style.strokeDasharray = target }) }
+  if (goalFresh && g.done) {
+    goalFresh = false
+    ring.classList.remove('just'); void ring.offsetWidth; ring.classList.add('just')
   }
 }
 // A streak with a missed day behind it is over: it reads 0 until you play again.
@@ -2956,16 +3769,32 @@ function expireStreak() {
 // Practice time, counted a second at a time while you are at it: always while the song
 // clock runs (a count-in or a demo too), and while the song waits for you or the
 // Playground is open only if a key went down in the last 20 s, so a song left waiting
-// over a break doesn't count.
+// over a break doesn't count. An exercise on its screen counts while you keep touching it
+// (a key, a tap or a click in the last 20 s), and the metronome counts while it runs.
 const IDLE_AFTER_MS = 20000
 let lastKeyAt = -Infinity       // performance.now() of the last key you pressed
+let lastActAt = -Infinity       // performance.now() of the last key press or tap on the exercise screen
+let lastJamTapAt = -Infinity    // performance.now() of the last tap on one of Jam's on-screen keys or pads
 let tickDay = null
+// The one place that says whether this second counts. The three cases exclude each other (one screen at a time,
+// and the metronome stops when its screen is left), so a second is never counted twice.
+function practiceCounts() {
+  if (screen === 'play') {
+    const keys = performance.now() - lastKeyAt < IDLE_AFTER_MS
+    return !!(freeplay ? keys : player && song && (player.clockRunning || (player.waiting && keys)))
+  }
+  if (screen === 'exercise') return !!exercise && performance.now() - lastActAt < IDLE_AFTER_MS
+  if (screen === 'jam') return !!jamUi && (jamUi.state().playing || performance.now() - Math.max(lastKeyAt, lastJamTapAt) < IDLE_AFTER_MS)
+  return !!practiceUi && practiceUi.metronomeRunning()
+}
+for (const ev of ['keydown', 'pointerdown']) document.addEventListener(ev, (e) => {
+  if (screen === 'exercise') lastActAt = performance.now()
+  else if (screen === 'jam' && e.target && e.target.closest && e.target.closest('.jam-key, .jam-pad')) lastJamTapAt = performance.now()
+}, true)
 function practiceTick() {
   const day = todayKey()
   if (day !== tickDay) { tickDay = day; expireStreak() }    // and again after midnight
-  if (screen !== 'play') return
-  const keys = performance.now() - lastKeyAt < IDLE_AFTER_MS
-  if (freeplay ? keys : player && song && (player.clockRunning || (player.waiting && keys))) recordPractice(1)
+  if (practiceCounts()) recordPractice(1)
 }
 expireStreak()                  // before Home first shows the streak
 setInterval(practiceTick, 1000)
@@ -2997,6 +3826,7 @@ const speedName = (rate) => (rate >= 0.999 ? 'full speed' : Math.round(rate * 10
 // Where the results lead on: the next step or lesson in a lesson, the next level in a
 // game, otherwise the next song in the library. primary: it is the way forward.
 function resultsNext(s) {
+  if (courseRun) return course.nextAction(courseRun.ownerId, courseRun.item.id, courseRun.passed)
   if (lessonMeta) {
     const i = LESSONS.findIndex((l) => l.id === lessonMeta.id)
     if (i < 0) return null
@@ -3034,10 +3864,10 @@ function showResults(s) {
   if (s.watched) {
     $('resKicker').textContent = 'WATCHED'
     $('resHead').textContent = 'Now try it yourself'
-    practiceBtn.textContent = 'Practise it'
+    practiceBtn.textContent = 'Practice it'
     $('resAgain').textContent = 'Watch again'
     watchBtn.classList.add('hidden')
-    $('resAcc').textContent = 'Practise waits for you on every note. Play keeps time and scores you.'
+    $('resAcc').textContent = 'Practice waits for you on every note. Play keeps time and scores you.'
     $('celebrate').replaceChildren()
     openResults(primary)
     return
@@ -3059,8 +3889,9 @@ function showResults(s) {
   ring.style.transition = ''
   requestAnimationFrame(() => { ring.style.strokeDashoffset = String(326.7 * (1 - s.overallAccuracy)) })
   const t0 = performance.now()
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
   const countUp = (t) => {
-    const k = Math.min(1, (t - t0 - 200) / 1100)
+    const k = still ? 1 : Math.min(1, (t - t0 - 150) / 600)
     $('resBig').textContent = Math.round(acc * (k <= 0 ? 0 : 1 - Math.pow(1 - k, 3))) + '%'
     if (k < 1) requestAnimationFrame(countUp)
   }
@@ -3074,6 +3905,8 @@ function showResults(s) {
     : practise
       ? `${firstTime} of ${s.totalNotes} notes right first time · the Challenge keeps your stars`
       : `note accuracy ${Math.round(s.noteAccuracy * 100)}% · rhythm accuracy ${Math.round(s.rhythmAccuracy * 100)}%`
+  if (courseRun && courseRun.filtered) $('resAcc').textContent += ' · not counted for the course: switch Hands to Both for this task'
+  else if (courseRun) $('resAcc').textContent += ` · ${courseRun.passed ? 'course item passed' : 'aim for ' + passText(courseRun.item) + ' to pass it'}${courseRun.lessonDone ? ' · lesson complete' : ''}`
   // Practise has no timing to judge: its cards count notes right first time, notes
   // found after a hint and wrong keys instead of the five timings
   const cards = practise
@@ -3096,7 +3929,7 @@ function showResults(s) {
   // mode-specific next steps
   watchBtn.classList.toggle('hidden', lastMode === 'WATCH')
   watchBtn.onclick = () => { hideResults(); setMode('WATCH'); if (player) player.restart(false) }
-  practiceBtn.textContent = lastMode === 'WATCH' ? 'Try yourself' : practise ? 'Challenge' : 'Practise'
+  practiceBtn.textContent = lastMode === 'WATCH' ? 'Try yourself' : practise ? 'Challenge' : 'Practice'
   burstStars(s.starRating)
   openResults(primary)
 }
@@ -3187,34 +4020,45 @@ function logRaw(data) {
 }
 
 // channelBase: the second keyboard's channels sit above the first's, since both use the same ones
-function handleMidiMessage(data, channelBase = 0) {
+// What each keyboard announces about expressive zones and bend range (Control Change messages). One state per
+// keyboard: the second keyboard of a joined pair reads on channels from 16 up. Reset when the keyboard changes.
+const mpeStates = [createMpeState(), createMpeState()]
+const mpeFor = (channelBase) => mpeStates[channelBase >= 16 ? 1 : 0]
+
+function handleMidiMessage(data, channelBase = 0, fed = false, portId = null) {
+  if (!fed && typeof deviceSupport !== 'undefined' && deviceSupport) deviceSupport.feed(data, portId)   // fed: pairMessage already did   // statistics for the device report, only while it is capturing
   const status = data[0]
   if (status == null || status < 0x80) return
   if (status === 0xf0) {   // device SysEx (config replies etc.) — don't spam the log
     if (rawLogged < 2) logRaw(data)
     return
   }
+  if (status < 0xf0) performanceControls?.send(data)
   const type = status & 0xf0
   const ch = (status & 0x0f) + channelBase
   const d1 = data[1] || 0, d2 = data[2] || 0
+  const mpe = mpeFor(channelBase)
+  if (type === 0xB0) mpe.feed(status, d1, d2)
   if (type === 0x90 && d2 > 0) { handleNoteOn(d1, d2, ch); return }
-  if (type === 0x80 || (type === 0x90 && d2 === 0)) { handleNoteOff(d1, ch); return }
+  if (type === 0x80 || (type === 0x90 && d2 === 0)) { handleNoteOff(d1, ch, type === 0x80 ? d2 : 0); return }
   if (type === 0xB0 && d1 === 64) { logMidi('cc', 64, d2, ch); setSustain(d2 >= 64); return }          // sustain pedal
   if (type === 0xB0 && (d1 === 120 || d1 === 123)) { stopAll(); return }    // all sound / notes off
   if (!settings.expression) return   // expression off: keys play like a piano
+  const jam = routeToJam() ? jamUi : null   // while Jam shows, its tracks take the gestures instead of the synth
   if (type === 0xE0) {
     const raw = (d2 << 7) | d1
     const norm = (raw - 8192) / 8192
-    setBend(ch, norm * settings.bendRange)
-    logExpr('bend', 'ch=' + ch + ' semis=' + (norm * settings.bendRange).toFixed(2))
+    const range = mpe.bendRangeFor(status & 0x0f) ?? settings.bendRange   // what the keyboard announced, else the setting
+    if (jam) jam.bend(ch, norm * range); else setBend(ch, norm * range)
+    logExpr('bend', 'ch=' + ch + ' semis=' + (norm * range).toFixed(2))
   } else if (type === 0xD0) {
-    setPressure(ch, d1 / 127)
+    if (jam) jam.press(ch, d1 / 127); else setPressure(ch, d1 / 127)
     logExpr('pressure', 'ch=' + ch + ' value=' + d1)
   } else if (type === 0xB0 && d1 === 74) {
-    setSlide(ch, d2 / 127)
+    if (jam) jam.slide(ch, d2 / 127); else setSlide(ch, d2 / 127)
     logExpr('slide', 'ch=' + ch + ' value=' + d2)
   } else if (type === 0xA0) {
-    setPolyPressure(d1, ch, d2 / 127)
+    if (jam) jam.press(ch, d2 / 127); else setPolyPressure(d1, ch, d2 / 127)
     logExpr('poly', 'ch=' + ch + ' note=' + d1 + ' value=' + d2)
   } else {
     logRaw(data)
@@ -3222,17 +4066,24 @@ function handleMidiMessage(data, channelBase = 0) {
 }
 
 function handleNoteOn(pitch, vel, channel = 0) {
+  if (screen === 'exercise') lastActAt = performance.now()
   initAudio()
   lastKeyAt = performance.now()
+  if (routeToJam()) { held.add(pitch); jamUi.noteOn(pitch, vel, channel); return }   // Jam plays it on the selected track: no second sound
   noteOn(pitch, vel, channel)
   logMidi('on', pitch, vel, channel)
   held.add(pitch)
   learnLengthFromNotes(pitch)
   calibrateFromNote(pitch)
+  airSource?.onNoteOn(pitch)
   quizPress(pitch)
+  if (exercise && screen === 'exercise') exercise.input(pitch, performance.now())
   if (!player || player.mode === 'WATCH') return
   const need = player.waiting ? new Set(player.needPitches) : null
+  const pendingForPitch = settings.fingerCoaching ? player.score.expected.filter((entry) => entry.pitch === pitch && entry.state === 'pending') : []
   const res = player.noteOn(pitch)
+  const matched = pendingForPitch.find((entry) => entry.state === 'hit')
+  if (matched) cameraCoach.notePlayed(pitch, matched.note)
   if (need) checkOctaveMismatch(pitch, need)
   // A long keyboard that can't be moved from here seldom plays a note off the screen, so this
   // is how its octave buttons get noticed outside Wait too.
@@ -3242,7 +4093,11 @@ function handleNoteOn(pitch, vel, channel = 0) {
   }
   if (res && res.kind && ['perfect', 'good', 'early', 'late'].includes(res.kind)) feedback.set(pitch, { kind: res.kind, until: performance.now() + 220 })
 }
-function handleNoteOff(pitch, channel = 0) { noteOff(pitch, channel); logMidi('off', pitch, 0, channel); held.delete(pitch); letGoAt.set(pitch, performance.now()) }
+// release: the key's release velocity (0..127) when the keyboard sent one, 0 when it did not
+function handleNoteOff(pitch, channel = 0, release = 0) {
+  if (routeToJam()) { held.delete(pitch); letGoAt.set(pitch, performance.now()); jamUi.noteOff(pitch, release > 0 ? release : 64, channel); return }
+  noteOff(pitch, channel); logMidi('off', pitch, 0, channel); held.delete(pitch); letGoAt.set(pitch, performance.now())
+}
 
 // Two keyboards on two cables play as one row of 48 keys. Each sends notes wherever its own octave
 // is, and both may send the same notes on the same channels, so a press is turned into its place in
@@ -3282,33 +4137,50 @@ function pairPitch(slot, raw) {
   return pitch >= 0 && pitch <= 127 ? pitch : null
 }
 function pairMessage(slot, data) {
+  if (typeof deviceSupport !== 'undefined' && deviceSupport) deviceSupport.feed(data, (slot ? midiInput2 : midiInput)?.id)   // the device report sees every paired message once
   const status = data[0]
   if (status == null || status < 0x80) return
   const type = status & 0xf0, d1 = data[1] || 0, d2 = data[2] || 0
   const ch = (status & 0x0f) + 16 * slot
+  const key = (status & 0x0f) * 128 + d1
   if (type === 0x90 && d2 > 0 && status < 0xf0) {
     const pitch = pairPitch(slot, d1)
     if (pitch == null) return
-    pair.down[slot].set(d1, pitch)
+    pair.down[slot].set(key, pitch)
     if (setup.open) setup.pressOf.set(pitch, { slot, raw: d1 })
+    performanceControls?.send([status, pitch, d2])
     handleNoteOn(pitch, d2, ch)
   } else if (type === 0x80 || type === 0x90) {
     // the note it was pressed as, even if the keys have moved since
-    const pitch = pair.down[slot].get(d1)
+    const pitch = pair.down[slot].get(key)
     if (pitch == null) return
-    pair.down[slot].delete(d1)
-    handleNoteOff(pitch, ch)
+    pair.down[slot].delete(key)
+    performanceControls?.send([status, pitch, d2])
+    handleNoteOff(pitch, ch, type === 0x80 ? d2 : 0)
   } else if (type === 0xB0 && d1 === 64) {
     // either pedal holds the sound: one keyboard letting go doesn't lift the other's
+    const wasDown = pair.pedal[0] || pair.pedal[1]
     pair.pedal[slot] = d2 >= 64
+    const down = pair.pedal[0] || pair.pedal[1]
+    // Internal sustain is global; mirror transitions on every external voice channel.
+    if (down !== wasDown) for (let channel = 0; channel < 16; channel++) performanceControls?.send([0xB0 | channel, 64, down ? 127 : 0])
     logMidi('cc', 64, d2, ch)
-    setSustain(pair.pedal[0] || pair.pedal[1])
+    setSustain(down)
   } else if (type === 0xB0 && (d1 === 120 || d1 === 123)) {
-    for (const [raw, pitch] of pair.down[slot]) { pair.down[slot].delete(raw); handleNoteOff(pitch, ch) }
+    // A channel-wide external CC would also silence the other keyboard on that channel.
+    for (const [heldKey, pitch] of pair.down[slot]) {
+      if (heldKey >> 7 !== (status & 0x0f)) continue
+      pair.down[slot].delete(heldKey)
+      performanceControls?.send([0x80 | (status & 0x0f), pitch, 0])
+      handleNoteOff(pitch, ch)
+    }
   } else if (type === 0xA0) {
-    const pitch = pair.down[slot].get(d1)
-    if (pitch != null && settings.expression) setPolyPressure(pitch, ch, d2 / 127)
-  } else handleMidiMessage(data, 16 * slot)
+    const pitch = pair.down[slot].get(key)
+    if (pitch != null) {
+      performanceControls?.send([status, pitch, d2])
+      if (settings.expression) { if (routeToJam()) jamUi.press(ch, d2 / 127); else setPolyPressure(pitch, ch, d2 / 127) }
+    }
+  } else handleMidiMessage(data, 16 * slot, true)
 }
 // With a light service, each keyboard is held at octave 0 and the row moves in the app, so the two
 // can't drift apart when an octave button is pressed.
@@ -3409,10 +4281,13 @@ let kbAsk = false       // Automatic found several inputs and needs you to choos
 function bindMidiPorts() {
   if (!midi) return
   const wasTwo = !!midiInput2
-  const { input, output, input2 = null, output2 = null, ask = false } = pickPorts(midi.inputs.values(), midi.outputs.values(), settings.kbPort)
+  const keyboardInputs = [...midi.inputs.values()].filter((port) => !/airwave/i.test(portLabel(port)) && port.id !== performanceControls?.gestureInputId())
+  const { input, output, input2 = null, output2 = null, ask = false } = pickPorts(keyboardInputs, midi.outputs.values(), settings.kbPort)
   if (ask && !kbAsk) status('Several MIDI inputs found: choose your keyboard in Settings')
   kbAsk = ask
   if (input !== midiInput || input2 !== midiInput2) {
+    performanceControls?.panic()
+    for (const m of mpeStates) m.reset()
     if (midiInput) midiInput.onmidimessage = null
     if (midiInput2) midiInput2.onmidimessage = null
     // the old port's note-offs and pedal-up will never come
@@ -3421,12 +4296,12 @@ function bindMidiPorts() {
     midiInput2 = input2
     lastFarAt = -Infinity
     if (midiInput2) {
-      midiInput2.onmidimessage = (ev) => pairMessage(1, ev.data)
+      midiInput2.onmidimessage = (ev) => pairMessage(1, ev.data)   // the port is read from midiInput/midiInput2 for the device report
       if (!loadPair()) status('Two keyboards found: they now play as one. Run setup again in Settings so Keylight knows which is on the left')
       holdPairOctave()
     }
     if (midiInput) {
-      midiInput.onmidimessage = (ev) => (midiInput2 ? pairMessage(0, ev.data) : handleMidiMessage(ev.data))
+      midiInput.onmidimessage = (ev) => (midiInput2 ? pairMessage(0, ev.data) : handleMidiMessage(ev.data, 0, false, input.id))
       settings.kbLast = portLabel(midiInput)
       // a count chosen with no keyboard plugged in was meant for this one
       if (settings.kbKeysFor[''] && !settings.kbKeysFor[kbLabel()]) settings.kbKeysFor[kbLabel()] = settings.kbKeysFor['']
@@ -3435,7 +4310,8 @@ function bindMidiPorts() {
       if (!player) restoreKeysAt()
     }
   }
-  if (output !== midiOutput || output2 !== midiOutput2) { clearNoteLights(); midiOutput = output; midiOutput2 = output2 }
+  if (output !== midiOutput || output2 !== midiOutput2) { leaveApiMode(); clearNoteLights(); midiOutput = output; midiOutput2 = output2 }
+  performanceControls?.updateMidi(midi, [midiInput, midiInput2], [midiOutput, midiOutput2])
   applyKeyCount()
   // back to one keyboard: its octave goes back to meaning what the screen says
   if (wasTwo && !midiInput2) setKeyboardWindow(kbBase())
@@ -3453,7 +4329,7 @@ function bindMidiPorts() {
 
 async function initMidi() {
   try {
-    midi = await navigator.requestMIDIAccess({ sysex: true })
+    midi = await (IS_NATIVE_HOST ? requestAndroidMIDIAccess({ sysex: true }) : navigator.requestMIDIAccess({ sysex: true }))
     console.log('MIDI ready: inputs=' + [...midi.inputs.values()].map((p) => p.name).join('|') + ' outputs=' + [...midi.outputs.values()].map((p) => p.name).join('|'))
     midi.onstatechange = () => bindMidiPorts()
     bindMidiPorts()
@@ -3467,6 +4343,14 @@ function updateKbChip() {
   chip.classList.toggle('on', connected)
   const lit = framesDrive() || (noteLightsOnly() && !!midiOutput)
   const name = midiInput2 ? 'Two keyboards' : 'Keyboard'
+  const help = $('kbHelp')
+  if (help) {
+    const none = !connected && !kbAsk && !!midi
+    help.classList.toggle('hidden', !none)
+    help.textContent = none ? 'No keyboard found. Check it is plugged in over USB and switched on. ' + noKeyboardNextStep() : ''
+  }
+  const helpSupport = $('kbHelpSupportRow')
+  if (helpSupport) helpSupport.classList.toggle('hidden', connected || kbAsk || !midi)
   $('kbStatusText').textContent = connected ? (lit ? name + ' connected' : name + ' · lights off') : kbAsk ? 'Choose a keyboard' : 'No keyboard'
   if (noteLightsOnly()) showWindowsLights()
 }
@@ -3522,7 +4406,7 @@ const kbKeys = () => (midiInput2 ? 48 : settings.kbKeysFor[kbLabel()] || keysAut
 const lightKeys = () => (kbKeys() === 48 ? 48 : 24)     // how many keys a frame for the light service has
 // blocksd only drives the 24-key keyboards, so a longer one lights from MIDI notes, as on Windows;
 // two 24-key keyboards it drives one frame each
-const noteLightsOnly = () => IS_WIN || (kbKeys() > 24 && !(kbKeys() === 48 && framesDrive()))
+const noteLightsOnly = () => IS_WIN || IS_NATIVE_HOST || (kbKeys() > 24 && !(kbKeys() === 48 && framesDrive()))
 // Whether the light service does the lighting: on a 48-key row, only if it reaches both keyboards
 const framesDrive = () => !!(daemon && daemon.ready) && (kbKeys() !== 48 || daemon.count >= 2)
 // Whether the app can move the keys' octave itself, through the light service. Not on two
@@ -3626,8 +4510,8 @@ function applyKeyCount() {
   $('kbKeys').disabled = !!midiInput2
   $('kbKeys').options[0].textContent = 'Automatic (' + keysAuto() + ' keys)'
   $('swapRow').classList.toggle('hidden', !canSwapLights())
-  if (!IS_WIN) {
-    $('lightsLabel').textContent = noteLightsOnly() ? 'Key lights' : 'Light service'
+  for (const id of ['exactRow', 'exactHint']) if ($(id)) $(id).classList.toggle('hidden', !noteLightsOnly())
+  if (!(IS_WIN || IS_NATIVE_HOST)) {
     if (!noteLightsOnly()) { $('brightness').disabled = false; $('brightness').title = ''; showDaemonState() }
   }
   syncOctaveUI()
@@ -3757,11 +4641,22 @@ function showDaemonState() {
   const el = $('daemonState'), state = daemonState
   // a refused frame still means the service is there
   if (el) el.textContent = state === 'connected' || state === 'rejected' ? 'Connected' : state === 'no-device' ? 'Running, no keyboard found'
-    : state === 'unavailable' || state === 'disconnected' ? 'Not running' : state === 'checking' ? 'checking…' : state
+    : state === 'unavailable' || state === 'disconnected' ? 'Not running: the light service did not answer' : state === 'checking' ? 'checking…' : state
+  const retry = $('daemonRetry')
+  if (retry) retry.classList.toggle('hidden', IS_WIN || IS_NATIVE_HOST || !['unavailable', 'disconnected', 'no-device'].includes(state))
+}
+function retryDaemon() {
+  if (!daemon) return
+  daemonState = 'checking'
+  showDaemonState()
+  const api = window.keylightNative && window.keylightNative.daemon
+  if (api && BUNDLED_DAEMON) api.retry().then((st) => { if (st && st.port) daemon.setPort(st.port) }).catch(() => {})
+  daemon.retry()
 }
 // The light service sees a different number of keyboards. Its order changes with replugging, so
 // the first order seen is kept as left and right until someone swaps them.
 function serviceBoardsChanged() {
+  guardApiMode()
   const two = daemon.count >= 2
   if (two && !settings.kbLightsLeft && daemon.boards[0].serial) {
     settings.kbLightsLeft = daemon.boards[0].serial
@@ -3775,6 +4670,7 @@ function serviceBoardsChanged() {
   if (changed) applyKeyCount()
 }
 function initDaemon() {
+  if (IS_NATIVE_HOST) return
   daemon = new LedDaemon((state, info, device) => {
     if (state === 'info') { showKeyboardInfo(info); return }   // a battery update from the same keyboard
     // a second keyboard came or went, the first still being driven
@@ -3801,20 +4697,47 @@ function initDaemon() {
   }, handleKeyButton, onDeviceConfig)
   daemon.setLeft(settings.kbLightsLeft)
   daemon.connect()
+  watchDaemonService()
+}
+
+// The packaged app tells the page how its light service is doing (starting, ready, failed, or an
+// external blocksd in use) and on which port. A failed service shows the manual route in the
+// setup and Settings; a new port reconnects there; Try again also asks the app to look again.
+function watchDaemonService() {
+  const api = window.keylightNative && window.keylightNative.daemon
+  if (!api) return
+  const apply = (st) => {
+    if (!st || st.state === 'none') return
+    svcState = st.state; svcReason = st.reason || ''
+    if (st.port && daemon) daemon.setPort(st.port)
+    showDaemonState()
+    if (setup.open) renderSetup()
+  }
+  api.onStatus(apply)
+  api.status().then(apply).catch(() => {})
 }
 
 // Battery from the light service: a row under Light service in Settings, and the keyboard
 // chip's tooltip; once a session, a word when it runs low off the charger.
 let lowBatteryWarned = false
 function showKeyboardInfo(dev) {
-  const text = dev && dev.battery != null ? dev.battery + '%' + (dev.charging ? ' · charging' : '') : ''
+  const all = daemon && daemon.devices && daemon.devices.length ? daemon.devices : (dev ? [dev] : [])
+  const text = all
+    .map((d, i) => d && d.battery != null ? (all.length > 1 ? 'Keyboard ' + (i + 1) + ': ' : '') + d.battery + '%' + (d.charging ? ' · charging' : '') : '')
+    .filter(Boolean)
+    .join('  ·  ')
   const row = $('batteryRow')
   if (row) { row.classList.toggle('hidden', !text); $('kbBattery').textContent = text }
   const chip = $('kbStatus')
   if (chip) chip.title = text ? 'Battery ' + text : ''
-  if (dev && dev.battery != null && dev.battery <= 15 && !dev.charging && !lowBatteryWarned) {
+  if (!lowBatteryWarned) {
+    const at = all.findIndex((d) => d && d.battery != null && d.battery <= 15 && !d.charging)
+    if (at < 0) return
     lowBatteryWarned = true
-    status('Your keyboard battery is low (' + dev.battery + '%): plug it in to keep playing')
+    const level = all[at].battery
+    status(all.length > 1
+      ? 'Keyboard ' + (at + 1) + ' battery is low (' + level + '%): plug it in to keep playing'
+      : 'Your keyboard battery is low (' + level + '%): plug it in to keep playing')
   }
 }
 
@@ -4023,6 +4946,7 @@ function restFrame() {
   const base = kbBase()
   const frame = Array.from({ length: lightKeys() }, (_, i) => restRgb(base + i, i))
   for (const pitch of quizHintPitches()) if (pitch >= base && pitch < base + frame.length) frame[pitch - base] = userRgb()
+  for (const pitch of jamLitPitches()) frame[pitch - base] = userRgb()
   drawPlayedKeys(frame, base)
   drawStylePreview(frame, base)
   drawOctaveSweep(frame, base)
@@ -4125,9 +5049,21 @@ function idleNoteLights() {
   const desired = new Map()
   if (midiOutput) {
     for (const pitch of quizHintPitches()) desired.set(pitch, noteLightColour(userRgb()))
+    for (const pitch of jamLitPitches()) desired.set(pitch, noteLightColour(userRgb()))
     addHeldNoteLights(desired)
   }
   updateNoteLights(desired)
+}
+
+function freeplayScene(chordAlpha) {
+  return {
+    position: 0, notes: [], activeNotes: [], upcomingNotes: [],
+    view: settings.view, noteLabels: 'off', windowStart: kbBase(),
+    waiting: false, needPitches: new Set(), playing: false,
+    countInUntil: 0, countInSeconds: 0, tempo: 120, now: performance.now() / 1000,
+    handFilter: 'both', loop: {}, held: fpDemo ? new Set([...held, ...fpDemo]) : held, feedback,
+    scale: freeScalePcs(), scaleRoot: freeRoot, chordName: fpChord.name, chordAlpha
+  }
 }
 
 function frame(ts) {
@@ -4156,17 +5092,7 @@ function frame(ts) {
   if (freeplay) {
     const chordAlpha = updateFreeplayChord(performance.now())
     let fpGeo = null
-    try { fpGeo = drawScene(ctx2d, W, H, {
-      position: 0, notes: [], activeNotes: [], upcomingNotes: [],
-      view: 'CASCADE', noteLabels: 'off', windowStart: kbBase(),
-      waiting: false, needPitches: new Set(), playing: false,
-      countInUntil: 0, countInSeconds: 0, tempo: 120, now: performance.now() / 1000,
-      handFilter: 'both', loop: {}, held: fpDemo ? new Set([...held, ...fpDemo]) : held, feedback,
-      scale: freeScalePcs(),
-      scaleRoot: freeRoot,
-      chordName: fpChord.name,
-      chordAlpha
-    }) } catch (e) { if (!drawErrorLogged) { drawErrorLogged = true; console.log('RENDER ERROR (freeplay) ' + (e && e.message)) } }
+    try { fpGeo = drawScene(ctx2d, W, H, freeplayScene(chordAlpha)) } catch (e) { if (!drawErrorLogged) { drawErrorLogged = true; console.log('RENDER ERROR (freeplay) ' + (e && e.message)) } }
     if (cameraOn() && fpGeo) {
       drawFingerBadges(ctx2d, fpGeo, fingerHover(fpGeo))
       if (!$('camPip').classList.contains('hidden')) drawCamera($('camPipCanvas'))
@@ -4181,7 +5107,7 @@ function frame(ts) {
   player.snapshot.activeNotes = snap.activeNotes
   player.snapshot.upcomingNotes = snap.upcomingNotes
 
-  try {
+  if (!$('screen-play').classList.contains('sheet-only')) try {
   const geo = drawScene(ctx2d, W, H, {
     position: snap.position,
     notes: player.speedNotes,
@@ -4206,9 +5132,10 @@ function frame(ts) {
     feedback,
     backdrop: backdropImg
   })
-  if (cameraOn()) {
+  keyboardGeometry = geo
+  if (airSource?.selected() || cameraOn()) {
     drawFingerBadges(ctx2d, geo, fingerHover(geo))
-    if (!$('camPip').classList.contains('hidden')) drawCamera($('camPipCanvas'))
+    if (cameraOn() && !airSource?.selected() && !$('camPip').classList.contains('hidden')) drawCamera($('camPipCanvas'))
   }
   } catch (e) {
     if (!drawErrorLogged) { drawErrorLogged = true; console.log('RENDER ERROR ' + (e && e.message)) }
@@ -4218,7 +5145,7 @@ function frame(ts) {
   pumpAudio()
   syncRecording()
   updateLyrics(snap.position)
-  updateSheet(snap.position)
+  updateSheet(snap)
 
   // lights
   if (!framesDrive()) {
@@ -4226,7 +5153,7 @@ function frame(ts) {
     if (midiOutput) {
       const style = lightStyle()
       for (const n of snap.activeNotes) desired.set(n.pitch, noteLightColour(noteRgb(n, style)))
-      for (const n of snap.upcomingNotes) if (!desired.has(n.pitch)) desired.set(n.pitch, noteLightColour(nextNoteColour(n, style)) | NOTE_DIM)
+      for (const n of snap.upcomingNotes) if (!desired.has(n.pitch)) desired.set(n.pitch, asNext(noteLightColour(nextNoteColour(n, style))))
       if (snap.waiting) for (const n of snap.waitNotes || []) if (snap.needPitches.has(n.pitch)) desired.set(n.pitch, noteLightColour(noteRgb(n, style)))
       addHeldNoteLights(desired)
     }
@@ -4248,6 +5175,7 @@ function frame(ts) {
   const secLen = Math.max(0.001, player.end - secFrom)
   const pct = Math.max(0, Math.min(1, (snap.position - secFrom) / secLen))
   $('progressFill').style.width = (pct * 100).toFixed(2) + '%'
+  $('progress').setAttribute('aria-valuenow', Math.round(pct * 100))
   const loop = snap.loop || {}
   const region = $('loopRegion'), mA = $('loopMarkerA'), mB = $('loopMarkerB')
   const at = (t) => Math.max(0, Math.min(100, ((t - secFrom) / secLen) * 100))
@@ -4282,13 +5210,106 @@ function pumpAudio() {
 
 /* ============================== misc UI ============================== */
 let toastTimer = null
-function status(msg) {
+function status(msg, action) {
   const el = $('status')
   if (!el || !msg) return
   el.textContent = msg
+  el.classList.toggle('has-action', !!action)
+  if (action) {
+    const b = document.createElement('button')
+    b.className = 'toast-action'
+    b.textContent = action.label
+    b.onclick = () => { el.classList.remove('show'); action.run() }
+    el.append(b)
+  }
   el.classList.add('show')
   clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2600)
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 7000 : 2600)
+}
+
+// A styled stand-in for confirm(): Cancel has focus, Escape cancels, focus goes back to where it was.
+function askConfirm(title, text, ok = 'OK', danger = true) {
+  const dlg = $('confirmDialog')
+  if (dlg.open) return Promise.resolve(false)
+  const back = document.activeElement
+  $('confirmTitle').textContent = title
+  $('confirmText').textContent = text
+  const okBtn = $('confirmOk')
+  okBtn.textContent = ok
+  okBtn.className = danger ? 'ghost danger' : 'primary'
+  return new Promise((resolve) => {
+    let yes = false
+    okBtn.onclick = () => { yes = true; dlg.close() }
+    $('confirmCancel').onclick = () => dlg.close()
+    dlg.addEventListener('close', () => { resolve(yes); if (back && back.isConnected) back.focus() }, { once: true })
+    dlg.showModal()
+    $('confirmCancel').focus()
+  })
+}
+
+// What to try when no keyboard shows up
+function noKeyboardNextStep() {
+  return IS_WIN ? 'If it still isn’t found, install the keyboard maker’s Connect app (it adds the USB driver), then unplug and replug it.'
+    : 'Try another cable or USB port, then replug it.'
+}
+function supportDeviceAction() { return { label: 'Support my device', run: () => deviceSupport && deviceSupport.open(0) } }
+function keyboardSettingsAction() { return { label: 'Keyboard settings', run: () => jumpSettings('setLights', true) } }
+let paintJump = null, jumpLock = '', jumpLockTill = 0   // the chip you clicked stays lit until you scroll yourself
+function jumpSettings(id, open) {
+  if (open && screen !== 'settings') showScreen('settings')
+  const card = $(id)
+  if (!card) return
+  jumpLock = id; jumpLockTill = performance.now() + 1200   // the smooth scroll's own events don't count
+  if (paintJump) paintJump()
+  const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
+  card.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' })
+  const h = card.querySelector('h3')
+  if (h) h.focus({ preventScroll: true })
+}
+
+// Range sliders show a mint fill up to their value (the --pct custom property feeds glass.css)
+function paintRange(r) {
+  const mn = +r.min || 0, mx = +r.max || 100
+  r.style.setProperty('--pct', ((r.value - mn) / ((mx - mn) || 1) * 100) + '%')
+  // the value shown next to the slider, and read out by screen readers
+  const out = r.parentElement && r.parentElement.querySelector('output[data-unit]')
+  if (out) {
+    const text = out.dataset.unit === 'pct255' ? Math.round(r.value / 255 * 100) + '%' : r.value + '%'
+    if (out.textContent !== text) out.textContent = text
+    r.setAttribute('aria-valuetext', text)
+  }
+}
+document.addEventListener('input', (e) => { if (e.target && e.target.type === 'range') paintRange(e.target) }, true)
+new MutationObserver(() => { for (const r of document.querySelectorAll('input[type="range"]')) paintRange(r) })
+  .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['value', 'min', 'max'] })
+window.addEventListener('load', () => { for (const r of document.querySelectorAll('input[type="range"]')) paintRange(r) })
+setInterval(() => { if (screen === 'settings') for (const r of document.querySelectorAll('#screen-settings input[type="range"]')) paintRange(r) }, 700)
+
+// The jump chip for the card being read lights up as Settings scrolls
+if ($('screen-settings') && $('settingsJump')) {
+  const order = ['setLights', 'setSound', 'setDisplay', 'setPractice', 'setExternal', 'setCamera', 'setProgress', 'setExperimental', 'airCard']
+  const chipFor = id => id === 'airCard' ? 'setExperimental' : id
+  let queued = false
+  const paint = () => {
+    queued = false
+    const sc = $('screen-settings')
+    if (screen !== 'settings') return
+    // the card read last: the one lowest above the line (cards side by side tie, the first in order wins)
+    let active = order[0], best = -Infinity
+    for (const id of order) { const el = $(id); if (!el) continue; const top = el.getBoundingClientRect().top; if (top <= 190 && top > best) { best = top; active = id } }
+    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) active = order.filter((id) => $(id) && $(id).getClientRects().length).pop()
+    if (jumpLock && performance.now() < jumpLockTill) active = jumpLock
+    else jumpLock = ''
+    for (const b of document.querySelectorAll('#settingsJump [data-jump]')) {
+      const on = b.dataset.jump === chipFor(active)
+      b.classList.toggle('on', on)
+      if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current')
+    }
+  }
+  paintJump = paint
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#nav, #openSettings')) setTimeout(paint, 60) })   // Lights is lit when Settings opens
+  for (const ev of ['wheel', 'touchmove', 'keydown']) $('screen-settings').addEventListener(ev, () => { jumpLock = '' }, { passive: true })   // scrolling yourself ends the click's hold
+  $('screen-settings').addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(paint) } }, { passive: true })
 }
 
 // A short synthetic recording (one sine note per half second) as a WAV File.
@@ -5064,6 +6085,7 @@ async function runSelfTest() {
         const sent = [], fake = { name: 'LUMI Keys BLOCK', state: 'connected', send: (m) => sent.push([...m]) }
         const out0 = midiOutput, style0 = lightStyle()
         await openLibrary('twinkle.xml')
+        leaveApiMode()
         midiOutput = fake
         blankedPorts.delete(fake)
         await new Promise((r) => setTimeout(r, 250))
@@ -5078,6 +6100,7 @@ async function runSelfTest() {
         await new Promise((r) => setTimeout(r, 120))
         check('nothing lit away from a song', litNotes.size === 0, litNotes.size)
         sent.length = 0
+        leaveApiMode()
         midiOutput = out0
         syncOwnColours()
         check('own colours come back when the port goes', sent.some((m) => m[0] === 0xf0 && m[8] === 0x02) && !blankedPorts.has(fake))
@@ -5117,7 +6140,7 @@ async function runSelfTest() {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms))
       const fresh = () => {
         Object.assign(settings, { kbKeysFor: {}, kbBaseFor: {}, kbLast: '', kbPort: '', kbZero: 48 })
-        kbOctave = 0; kbSetAt = 0; midiInput = null; midiOutput = null; player = null; song = null
+        leaveApiMode(); kbOctave = 0; kbSetAt = 0; midiInput = null; midiOutput = null; player = null; song = null
         held.clear(); letGoAt.clear(); pressedAt.clear(); lastFarAt = -Infinity; octaveMiss = { offset: 0, pitches: [] }
       }
       const musicNotes = mk([60, 62, 64, 65, 67, 69, 71, 72, 74, 76])
@@ -5206,7 +6229,7 @@ async function runSelfTest() {
         on(36); on(84); off(36); off(84)
         await wait(NOTES_TOGETHER_MS + 100)
         on(36); on(84); off(36); off(84)
-        midi = null; midiInput = null; midiOutput = null; kbOctave = 0
+        leaveApiMode(); midi = null; midiInput = null; midiOutput = null; kbOctave = 0
         restoreKeysAt()
         check('restart keeps length and position', kbKeys() === 49 && kbBase() === 36, kbKeys() + ' keys at ' + kbBase())
         applyKeyCount()
@@ -5402,6 +6425,7 @@ async function runSelfTest() {
         kbSetAt = saved.set
         midi = saved.midi
         midiInput = saved.input
+        leaveApiMode()
         midiOutput = saved.output
         player = saved.player
         song = saved.song
@@ -5449,7 +6473,7 @@ async function runSelfTest() {
     const twins = () => plug([port('in-a'), port('in-b')], [port('out-a'), port('out-b')])
     try {
       Object.assign(settings, { kbPort: '', kbKeysFor: {}, kbBaseFor: {}, kbPair: {}, kbZero: 48, kbLast: '', kbLightsSwap: false })
-      kbOctave = 0; midiInput = null; midiOutput = null; midiInput2 = null; midiOutput2 = null; player = null; song = null
+      leaveApiMode(); kbOctave = 0; midiInput = null; midiOutput = null; midiInput2 = null; midiOutput2 = null; player = null; song = null
       held.clear(); letGoAt.clear()
       plug([port('in-a')], [port('out-a')])
       check('one keyboard stays one keyboard', !midiInput2 && kbKeys() === 24 && midiInput === ins[0] && midiOutput === outs[0])
@@ -5644,6 +6668,30 @@ async function runSelfTest() {
     }
   } else console.log('SELFTEST two keyboards: skipped, a light service is running')
 
+  // ---------- instrument and Playground view pickers ----------
+  {
+    const check = (what, ok, got) => console.log('SELFTEST pickers ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const wasInstrument = settings.instrument, wasView = settings.view
+    try {
+      startFreeplay()
+      const picker = $('btnInst'), list = instrumentList()
+      check('instrument names in both selectors', picker.tagName === 'SELECT' && ['btnInst', 'instrument'].every((id) => [...$(id).options].every((o, i) => o.value === list[i].id && o.textContent === list[i].name) && $(id).options.length === list.length))
+      picker.value = 'cello'; await picker.onchange()
+      check('direct selection is stored and shared', currentInstrument() === 'cello' && settings.instrument === 'cello' && $('instrument').value === 'cello' && store.get('lumi.settings', {}).instrument === 'cello')
+      picker.click()
+      check('opening the selector keeps the sound', currentInstrument() === 'cello')
+      $('instrument').value = 'epiano'; await $('instrument').onchange()
+      check('Settings updates the toolbar', picker.value === 'epiano' && currentInstrument() === 'epiano')
+      const g = document.createElement('canvas').getContext('2d')
+      openViewMenu(); $('viewMenu').querySelector('[data-view="CLASSIC"]').click()
+      const flat = drawScene(g, 800, 400, freeplayScene(1)).frontY
+      check('Playground Classic applies from the menu', settings.view === 'CLASSIC' && freeplayScene(1).view === 'CLASSIC' && flat === 400 && !viewMenuOpen() && takeMeta('test').view === 'CLASSIC')
+      openViewMenu(); $('viewMenu').querySelector('[data-view="CASCADE"]').click()
+      const perspective = drawScene(g, 800, 400, freeplayScene(1)).frontY
+      check('Playground Cascade changes the layout', settings.view === 'CASCADE' && perspective !== flat, flat + ' -> ' + perspective)
+    } catch (e) { check('run', false, e && e.message) }
+    finally { await instrumentControls.choose(wasInstrument); chooseView(wasView); showScreen('home') }
+  }
   // ---------- sheet music ----------
   {
     const check = (what, ok, got) => console.log('SELFTEST sheet ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
@@ -5683,6 +6731,7 @@ async function runSelfTest() {
     check('a seek lands on that bar', Math.abs(timelineX(sheet.timeline, player.currentPosition()) - timelineX(sheet.timeline, song.bars[2])) < 60)
     let everySong = 0, bad = []
     for (const l of LIBRARY) {
+      if (!/\.xml$/.test(l.file)) { everySong++; continue }   // MIDI songs have no score to draw
       const r = await fetch('songs/' + l.file)
       const s = await loadSongFile({ name: l.file, text: () => r.text() })
       try {
@@ -5697,6 +6746,34 @@ async function runSelfTest() {
     song = midiSong
     startSong()
     check('a song with no score has no sheet music', $('btnSheet').classList.contains('hidden') && $('sheetStrip').classList.contains('hidden'))
+    // Sheet only: the view menu offers it, the sheet fills the stage, and a song without a score explains itself
+    {
+      const wasView = settings.view
+      await openLibrary('twinkle.xml')
+      openViewMenu()
+      const item = $('viewMenu').querySelector('[data-view="SHEET"]')
+      check('Sheet only is in the view menu', !!item && item.getAttribute('aria-disabled') === 'false')
+      item.click()
+      await drawn(song.score)
+      check('Sheet only hides the falling notes and fills the stage', settings.view === 'SHEET' && $('screen-play').classList.contains('sheet-only') && !$('sheetStrip').classList.contains('hidden') && $('sheetStrip').offsetHeight > 200 && getComputedStyle(canvas.parentElement).display === 'none', $('sheetStrip').offsetHeight)
+      check('Sheet only keeps the player controls and the Sheet button is locked on', $('btnPlay').offsetParent !== null && $('btnSheet').disabled)
+      const row = sheet.timeline.find((r) => r.notes && r.notes.length)
+      if (row) {
+        const rn = { pitch: row.notes[0].pitch, hand: 'right', start: row.t }
+        sheet.update(rn.start + 0.01, [rn])
+        const glow = $('sheetMusic').querySelector('.sheet-due')
+        check('the due note glows in the hand colour on the sheet', !!glow && glow.dataset.sheetHand === 'right' && getComputedStyle(glow).filter.includes('drop-shadow'), glow ? glow.dataset.sheetHand : 'none')
+        sheet.update(rn.start + 0.01, [])
+        check('the glow goes when the note is no longer due', !$('sheetMusic').querySelector('.sheet-due'))
+      }
+      song = { title: 'x', notes: [{ pitch: 60, start: 0, dur: 1, vel: 90, hand: 'right' }], duration: 1, tempo: 120 }
+      startSong()
+      check('Sheet only without a score says so and offers a way back', settings.view === 'SHEET' && !$('sheetMissing').classList.contains('hidden') && /no sheet music/.test($('sheetMissing').textContent) && !$('screen-play').classList.contains('sheet-only'))
+      $('sheetMissingBack').click()
+      check('the way back returns to Cascade', settings.view === 'CASCADE' && $('sheetMissing').classList.contains('hidden'))
+      settings.view = wasView; saveSettings()
+      if (player) player.setView(settings.view)
+    }
     // a score with a repeat through the real parser, and a broken one that must say so
     const xml = (bars) => '<?xml version="1.0"?><score-partwise><part-list><score-part id="P1"><part-name>P</part-name></score-part></part-list><part id="P1">' + bars + '</part></score-partwise>'
     const bar = (n, step, extra = '') => '<measure number="' + n + '">' + (n === 1 ? '<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>' : '') + '<note><pitch><step>' + step + '</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>' + extra + '</measure>'
@@ -5711,6 +6788,898 @@ async function runSelfTest() {
     saveSettings()
     showScreen('home')
     hideSheet()
+  }
+  // expressive keyboards: an announced bend range wins over the setting; a silent keyboard keeps the setting
+  {
+    const check = (what, ok, got) => console.log('SELFTEST mpe ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const savedExpr = settings.expression, savedRange = settings.bendRange
+    try {
+      settings.expression = true; settings.bendRange = 12
+      for (const m of mpeStates) m.reset()
+      const cc = (ch, n, v) => handleMidiMessage([0xB0 | ch, n, v])
+      const shown = () => $('mpeState').textContent
+      handleMidiMessage([0xE1, 127, 127])
+      const plain = shown()
+      check('with nothing announced a full-up bend is the setting', /semis=12\.00/.test(plain), plain)
+      cc(0, 101, 0); cc(0, 100, 6); cc(0, 6, 15)       // lower zone, fifteen member channels
+      cc(1, 101, 0); cc(1, 100, 0); cc(1, 6, 24)       // bend range 24 on member channel 2
+      handleMidiMessage([0xE1, 127, 127])
+      const announced = shown()
+      check('an announced range of 24 makes a full-up bend 24 semitones on that channel', /semis=24\.00/.test(announced), announced)
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally { settings.expression = savedExpr; settings.bendRange = savedRange; for (const m of mpeStates) m.reset() }
+  }
+  // support reminder: a quiet card on Home at a calm moment, never on a fresh profile
+  {
+    const check = (what, ok, got) => console.log('SELFTEST support ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const savedState = localStorage.getItem('lumi.support')
+    const card = $('supportReminder')
+    const calm = () => window.dispatchEvent(new Event('keylight:calm-moment'))
+    const stored = () => JSON.parse(localStorage.getItem('lumi.support') || '{}')
+    const seed = () => localStorage.setItem('lumi.support', JSON.stringify({ firstLaunch: Date.now() - 15 * 86400000, lastShown: 0, snoozeUntil: 0, never: false, launchesSinceShown: 3 }))
+    try {
+      showScreen('home')
+      localStorage.removeItem('lumi.support')
+      calm()
+      check('not offered on a fresh profile', card.classList.contains('hidden'))
+      seed(); calm()
+      check('offered at a calm moment after 15 days and 3 launches', !card.classList.contains('hidden') && screen === 'home')
+      card.querySelector('[data-reminder="later"]').click()
+      let st = stored()
+      check('Maybe later hides the card and snoozes', card.classList.contains('hidden') && st.snoozeUntil > Date.now() && st.launchesSinceShown === 0 && st.never === false, JSON.stringify(st))
+      seed(); calm(); card.querySelector('[data-reminder="never"]').click()
+      st = stored()
+      check('Don\'t ask again hides the card and stores it', card.classList.contains('hidden') && st.never === true, JSON.stringify(st))
+      calm()
+      check('and it stays quiet afterwards', card.classList.contains('hidden'))
+      seed(); calm(); card.querySelector('[data-reminder="support"]').click()
+      st = stored()
+      const dlg = $('supportDialog')
+      check('Support Keylight opens the dialog, hides the card and records it', dlg.open && card.classList.contains('hidden') && st.launchesSinceShown === 0 && st.lastShown > 0, JSON.stringify(st))
+      dlg.close()
+      seed(); showScreen('settings'); calm()
+      check('never on another screen', card.classList.contains('hidden'))
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally {
+      if (savedState == null) localStorage.removeItem('lumi.support'); else localStorage.setItem('lumi.support', savedState)
+      card.classList.add('hidden'); $('supportDialog').open && $('supportDialog').close(); showScreen('home')
+    }
+  }
+  // course: the map, a quiz item answered, progress kept and the next lesson opened
+  {
+    const check = (what, ok, got) => console.log('SELFTEST course ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const saved = localStorage.getItem('lumi.course')
+    localStorage.removeItem('lumi.course')
+    showScreen('course')
+    const rows = (sel) => document.querySelectorAll('#screen-course ' + sel)
+    check('course screen lists every level', screen === 'course' && rows('.cr-level').length === COURSE.levels.length && !!document.querySelector('#nav [data-screen="course"].on'), rows('.cr-level').length + ' levels')
+    const l1 = COURSE.levels[0].lessons[0], l2 = COURSE.levels[0].lessons[1]
+    {
+      // the 'This comes after' sheet is an overlay: Android Back closes it first and stays on the Course
+      const ahead = document.querySelector(`#screen-course [data-act="lesson"][data-id="${l2.id}"]`)
+      if (ahead) ahead.click()
+      const opened = !!document.querySelector('.cr-sheet-back')
+      const handled = opened && globalThis.__keylightBack()
+      check('Back closes the "this comes after" sheet first', opened && handled === true && !document.querySelector('.cr-sheet-back') && screen === 'course', 'opened=' + opened + ' screen=' + screen)
+    }
+    const lockedBefore = !!document.querySelector(`#screen-course .cr-lrow[data-id="${l2.id}"]`)?.classList.contains('ahead')
+    course.openOwner(l1.id)
+    const q = l1.items.find((i) => i.type === 'theory')
+    course.startItem(l1.id, q.id)
+    const wrong = [...rows('.cr-opt')].find((b) => Number(b.dataset.i) !== q.params.answer)
+    wrong.click()
+    const wrongShown = !!document.querySelector('#screen-course .cr-fb.no') && document.querySelector('#screen-course .cr-fb').textContent.includes(q.params.why)
+    document.querySelector('#screen-course [data-act="theory-retry"]').click()
+    ;[...rows('.cr-opt')].find((b) => Number(b.dataset.i) === q.params.answer).click()
+    const rightShown = !!document.querySelector('#screen-course .cr-fb.ok')
+    const stored = JSON.parse(localStorage.getItem('lumi.course') || '{}')
+    const rec = stored.lessons && stored.lessons[l1.id] && stored.lessons[l1.id][q.id]
+    check('a course quiz answer is scored and kept', wrongShown && rightShown && !!rec && rec.accuracy === 1 && rec.tries === 2, JSON.stringify(rec))
+    const game = l1.items.find((i) => i.type === 'notegame')
+    const r = course.record(l1.id, game, { accuracy: 0.9 })
+    showScreen('home'); course.view.itemId = null; course.view.name = 'map'; showScreen('course')
+    const row2 = document.querySelector(`#screen-course .cr-lrow[data-id="${l2.id}"]`)
+    check('finishing a lesson opens the next', r.lessonDone && lockedBefore && !!row2 && !row2.classList.contains('ahead') && !!document.querySelector('#courseHome .course-card'), 'lessonDone=' + r.lessonDone + ' lockedBefore=' + lockedBefore)
+    let pieces = 0, badPieces = []
+    for (const lv of COURSE.levels) for (const items of [...lv.lessons.map((l) => l.items), lv.exam ? lv.exam.items : []]) for (const it of items) {
+      if (it.type !== 'piece' || it.params.song) continue
+      try { if (buildPieceSong(it.params, it.title).notes.length) pieces++ } catch (e) { badPieces.push(it.id) }
+    }
+    check('every inline course piece becomes a song', pieces > 0 && !badPieces.length, pieces + (badPieces.length ? ' bad=' + badPieces.join(' ') : ''))
+    if (saved == null) localStorage.removeItem('lumi.course'); else localStorage.setItem('lumi.course', saved)
+    course.show()
+    showScreen('home')
+  }
+  // course exercises: echo, rhythm, ear and sight run from the lesson page, report through the same
+  // result path as every other item, update the checklist, finish the lesson and open the next one
+  {
+    const check = (what, ok, got) => console.log('SELFTEST course ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const saved = localStorage.getItem('lumi.course')
+    try {
+      const note = async (p) => { handleMidiMessage([0x90, p, 100]); handleMidiMessage([0x80, p, 0]); await sleep(12) }
+      const stored = () => JSON.parse(localStorage.getItem('lumi.course') || '{}')
+      const recOf = (owner, item) => stored().lessons?.[owner]?.[item.id]
+      const all = []
+      for (const L of COURSE.levels) { for (const l of L.lessons) all.push({ owner: l.id, lesson: l, level: L }); if (L.exam) all.push({ owner: L.exam.id, exam: L.exam, level: L }) }
+      const seedBefore = (lessonId) => {      // every lesson before it done, every earlier level passed
+        let p = emptyProgress()
+        outer: for (const L of COURSE.levels) {
+          for (const l of L.lessons) { if (l.id === lessonId) break outer; for (const it of l.items) p = recordItemResult(p, l.id, it.id, { accuracy: 1 }) }
+          if (L.exam) p = recordExamResult(p, L.id, { percent: 100, passed: true })
+        }
+        localStorage.setItem('lumi.course', serializeProgress(p)); course.show()
+      }
+      const findItem = (types, inLesson = true) => { for (const L of COURSE.levels) for (const l of L.lessons) for (const it of l.items) if (types.includes(it.type) && (!inLesson || true)) return { lesson: l, item: it }; return null }
+      const pageHas = (sel) => !!document.querySelector('#screen-course ' + sel)
+      const backToLesson = async (ownerId, item) => {      // the result card's own button
+        const nb = document.querySelector('[data-ex="next"]')
+        const label = nb && nb.textContent
+        nb.click(); await sleep(60)
+        return { label, ok: screen === 'course' || screen === 'exercise' }
+      }
+      const tapKey = (code) => document.dispatchEvent(new KeyboardEvent('keydown', { code, key: code === 'Space' ? ' ' : code, bubbles: true, cancelable: true }))
+
+      // ----- echo: a wrong try, a retry, every round; the lesson completes and the next one opens -----
+      {
+        const lesson = COURSE.levels[0].lessons.find((l) => l.items.some((i) => i.type === 'echo'))
+        const item = lesson.items.find((i) => i.type === 'echo')
+        const next = COURSE.levels[0].lessons[COURSE.levels[0].lessons.indexOf(lesson) + 1]
+        seedBefore(lesson.id)
+        const others = lesson.items.filter((i) => i !== item).slice(0, Math.max(0, lesson.pass.minItemsDone - 1))
+        for (const o of others) course.record(lesson.id, o, { accuracy: 1 })
+        showScreen('course'); course.openOwner(lesson.id)
+        const nextLockedBefore = !!document.querySelector(`#screen-course .cr-lrow[data-id="${next.id}"]`)?.classList.contains('ahead') || !pageHas(`.cr-lrow[data-id="${next.id}"]`)
+        course.startItem(lesson.id, item.id); await sleep(60)
+        const started = screen === 'exercise' && exercise && exercise.type === 'echo' && !!document.querySelector('#screen-exercise .ex-slots')
+        let sawRetry = false, guard = 0
+        const rounds = [], firstTryWrong = { done: false }
+        while (!document.querySelector('#screen-exercise .ex-result') && guard++ < 12) {
+          exercise.run.skipListening(); await sleep(20)
+          const ph = exercise.run.phrase()
+          const wrong = !firstTryWrong.done
+          firstTryWrong.done = true
+          for (let i = 0; i < ph.length; i++) await note(wrong && i === 0 ? ph[i] + 1 : ph[i])
+          await sleep(320)
+          const retry = document.querySelector('#screen-exercise [data-ex="retry"]')
+          if (wrong) { sawRetry = !!retry && !!document.querySelector('#screen-exercise .ex-slot.bad'); retry && retry.click(); continue }
+          const adv = document.querySelector('#screen-exercise [data-ex="advance"]')
+          if (adv) adv.click(); rounds.push(1)
+        }
+        check('echo runs a wrong try, a retry and every round', started && sawRetry && !!document.querySelector('#screen-exercise .ex-result.ok'), `started=${started} retry=${sawRetry} rounds=${rounds.length}`)
+        const rec = recOf(lesson.id, item)
+        check('echo result is saved with accuracy, stars and tries', !!rec && rec.accuracy > 0.8 && rec.accuracy < 1 && rec.stars >= 3 && rec.tries === 1, JSON.stringify(rec))
+        const nextLabel = document.querySelector('#screen-exercise [data-ex="next"]').textContent
+        document.querySelector('#screen-exercise [data-ex="back"]').click()
+        const b = { label: /^(Next: |Back to)/.test(nextLabel) ? 'Back to lesson' : nextLabel }
+        await sleep(80)
+        const row = [...document.querySelectorAll('#screen-course .cr-item')].find((r) => r.textContent.includes(item.title))
+        check('echo: Back to lesson shows the row done and the lesson complete', screen === 'course' && b.label === 'Back to lesson' && !!row && row.classList.contains('done') && pageHas('.cr-complete'), `label=${b.label} done=${!!row && row.classList.contains('done')}`)
+        showScreen('home'); course.view.name = 'map'; showScreen('course')
+        const row2 = document.querySelector(`#screen-course .cr-lrow[data-id="${next.id}"]`)
+        check('echo: the next lesson unlocked', nextLockedBefore && !!row2 && !row2.classList.contains('ahead'))
+      }
+
+      // ----- rhythm: count-in, taps through every input path, timing judged -----
+      {
+        const { lesson, item } = findItem(['rhythm'])
+        seedBefore(lesson.id)
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(60)
+        const ready = screen === 'exercise' && exercise.type === 'rhythm' && exercise.run.state().phase === 'ready'
+        document.querySelector('#screen-exercise [data-ex="go"]').click(); await sleep(250)
+        const counting = exercise.run.state().phase === 'countin'
+        tapKey('Space'); await sleep(40); await note(60)
+        const routed = exercise.run.state().taps
+        const plan = exercise.run.plan()
+        const jitter = [12, -18, 25, -10, 8, 15, -5, 10]
+        plan.onsets.forEach((o, i) => exercise.run.tapAt(o.ms + jitter[i % jitter.length]))
+        exercise.run.judgeNow(); await sleep(60)
+        const ok = !!document.querySelector('#screen-exercise .ex-result.ok') && document.querySelectorAll('#screen-exercise .rx-mark').length >= plan.onsets.length
+        check('rhythm: count-in, Space and a MIDI note both counted as taps', ready && counting && routed === 2, `ready=${ready} counting=${counting} taps=${routed}`)
+        const rec = recOf(lesson.id, item)
+        check('rhythm: taps near the beat pass and the result is saved', ok && !!rec && rec.accuracy >= 0.95 && rec.stars >= 4, JSON.stringify(rec))
+        const b = await backToLesson(lesson.id, item)
+        check('rhythm: the button leads on', b.ok && /Back to|Next/.test(b.label), b.label)
+        // mashing one key is not a rhythm
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(40)
+        document.querySelector('#screen-exercise [data-ex="go"]').click(); await sleep(150)
+        for (let i = 0; i < 10; i++) exercise.run.tapAt(0)
+        exercise.run.judgeNow(); await sleep(40)
+        const miss = document.querySelector('#screen-exercise .ex-result.miss')
+        check('rhythm: tapping everything at once does not pass', !!miss, document.querySelector('#screen-exercise .ex-rscore')?.textContent)
+        showScreen('home')
+      }
+
+      // ----- ear: every question matches its answer; a wrong answer is explained -----
+      {
+        const { lesson, item } = findItem(['ear'])
+        seedBefore(lesson.id)
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(60)
+        const rounds = item.params.rounds || 8
+        let n = 0, wrongShown = false, firstWrong = true
+        const kinds = new Set()
+        for (; n < rounds + 2 && exercise && exercise.type === 'ear' && !document.querySelector('#screen-exercise .ex-result'); n++) {
+          const q = exercise.run.question()
+          kinds.add(q.kind)
+          const other = q.options.find((o) => o.id !== q.answer)
+          const button = (id) => [...document.querySelectorAll('#screen-exercise [data-ex="pick"]')].find((b) => b.dataset.id === id)
+          if (firstWrong) {
+            firstWrong = false
+            button(other.id).click(); await sleep(20)
+            wrongShown = !!document.querySelector('#screen-exercise .cr-fb.no') && document.querySelector('#screen-exercise .cr-fb').textContent.includes(q.why)
+          } else button(q.answer).click()
+          await sleep(15)
+          document.querySelector('#screen-exercise [data-ex="nxt"]').click(); await sleep(15)
+        }
+        const rec = recOf(lesson.id, item)
+        check('ear: every question answered and the wrong one explained', n === rounds && wrongShown && !!document.querySelector('#screen-exercise .ex-result'), `asked=${n}/${rounds} wrongShown=${wrongShown}`)
+        check('ear: accuracy is right answers over questions', !!rec && Math.abs(rec.accuracy - (rounds - 1) / rounds) < 1e-9, JSON.stringify(rec))
+        await backToLesson(lesson.id, item)
+        showScreen('home')
+      }
+
+      // ----- sight: a seeded line, read note by note -----
+      {
+        const { lesson, item } = findItem(['sight'])
+        seedBefore(lesson.id)
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(60)
+        const line = exercise.run.line()
+        const drawn = document.querySelectorAll('#screen-exercise .sg-n').length
+        await note(line.notes[0] + 1)           // a wrong first note, then the right one
+        const waiting = exercise.run.state().i === 0 && !!document.querySelector('#screen-exercise .ex-status.no')
+        for (const p of line.notes) await note(p)
+        await sleep(60)
+        const rec = recOf(lesson.id, item)
+        const expected = (line.notes.length - 1) / line.notes.length
+        check('sight: a wrong key waits, the line is read to the end and graded', drawn === line.notes.length && waiting && !!rec && Math.abs(rec.accuracy - expected) < 1e-9, `drawn=${drawn} waiting=${waiting} rec=${JSON.stringify(rec)}`)
+        await backToLesson(lesson.id, item)
+        showScreen('home')
+      }
+
+      // ----- the other item kinds finish through the results dialog or the quiz card -----
+      const finishPlayer = async () => {
+        for (let t = 0; t < 400 && $('results').classList.contains('hidden'); t++) {
+          if (player) {
+            if (!player.active) { player.setCountIn(0); player.setMode('PRACTISE'); player.play() }
+            player.tick()
+            if (player.waiting) for (const p of [...player.needPitches]) await note(p)
+          }
+          await sleep(30)
+        }
+        return !$('results').classList.contains('hidden')
+      }
+      for (const [label, types] of [['a toolbox exercise', ['five-finger', 'scale', 'arpeggio', 'chord']], ['a piece', ['piece']]]) {
+        const found = findItem(types)
+        if (!found) { check(label + ' runs through the results dialog', false, 'no such item'); continue }
+        const { lesson, item } = found
+        seedBefore(lesson.id)
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(500)
+        const shown = await finishPlayer()
+        const rec = recOf(lesson.id, item)
+        const nextLabel = $('resNext').textContent
+        check(label + ' reports through the results dialog and is saved', shown && !!rec && rec.accuracy >= 0.8 && !!courseRun && courseRun.passed === true, `shown=${shown} rec=${JSON.stringify(rec)} next=${nextLabel}`)
+        resultsPrimary.click(); await sleep(120)
+        const left = !$('results').classList.contains('hidden')
+        check(label + ': the results button leads on', !left && (screen === 'course' || screen === 'play') , `screen=${screen} next=${nextLabel}`)
+        showScreen('home'); hideResults()
+      }
+      {
+        const { lesson, item } = findItem(['notegame'])
+        seedBefore(lesson.id)
+        course.openOwner(lesson.id); course.startItem(lesson.id, item.id); await sleep(80)
+        const rounds = item.params.rounds || 10
+        for (let i = 0; i < rounds && quiz && !quiz.over; i++) quizPress(quiz.q.pitch)
+        const rec = recOf(lesson.id, item)
+        const back = $('quizBack')
+        check('a note game reports and offers the way on', !!rec && rec.accuracy === 1 && !back.classList.contains('hidden'), `${JSON.stringify(rec)} back=${back.textContent}`)
+        back.click(); await sleep(80)
+        check('a note game: its button returns to the lesson or the next item', screen === 'course' || screen === 'quiz' || screen === 'exercise' || screen === 'play', screen)
+        showScreen('home')
+      }
+
+      // ----- skip ahead, placement and the exam -----
+      {
+        localStorage.setItem('lumi.course', serializeProgress(emptyProgress()))
+        showScreen('home'); course.view.name = 'map'; course.view.itemId = null; showScreen('course')
+        const skip = document.querySelector('#screen-course [data-act="skip"][data-level="3"]')
+        skip.click(); await sleep(40)
+        const asked = $('confirmDialog').open
+        $('confirmOk').click(); await sleep(60)
+        const prog = stored()
+        check('skip ahead asks, then opens the levels up to it', asked && JSON.stringify(prog.unlocked) === '[2,3]' && !!document.querySelector('#cr-level-3.st-open'), `asked=${asked} unlocked=${JSON.stringify(prog.unlocked)}`)
+
+        localStorage.setItem('lumi.course', serializeProgress(emptyProgress())); course.show()
+        const place = document.querySelector('#screen-course [data-act="placement"][data-level="1"]')
+        place.click(); await sleep(60)
+        const exam = COURSE.levels[0].exam
+        const onExam = course.view.name === 'exam' && !!document.querySelector('#screen-course .cr-note')
+        const live = exam.items.find((i) => ['rhythm', 'echo', 'ear', 'sight'].includes(i.type)) || exam.items[0]
+        for (const it of exam.items) if (it !== live) course.record(exam.id, it, { accuracy: 1 })
+        const beforePassed = !!stored().exams?.[COURSE.levels[0].id]?.passed
+        if (['rhythm', 'echo', 'ear', 'sight'].includes(live.type)) {
+          course.startItem(exam.id, live.id); await sleep(60)
+          if (live.type === 'rhythm') { document.querySelector('#screen-exercise [data-ex="go"]').click(); await sleep(150); for (const o of exercise.run.plan().onsets) exercise.run.tapAt(o.ms + 10); exercise.run.judgeNow() }
+          else if (live.type === 'ear') { for (let i = 0; i < 20 && !document.querySelector('#screen-exercise .ex-result'); i++) { document.querySelector(`#screen-exercise [data-id="${exercise.run.question().answer}"]`).click(); await sleep(10); document.querySelector('#screen-exercise [data-ex="nxt"]').click(); await sleep(10) } }
+          else if (live.type === 'echo') { for (let i = 0; i < 12 && !document.querySelector('#screen-exercise .ex-result'); i++) { exercise.run.skipListening(); for (const p of exercise.run.phrase()) await note(p); await sleep(320); document.querySelector('#screen-exercise [data-ex="advance"]')?.click() } }
+          else { for (const p of exercise.run.line().notes) await note(p) }
+          await sleep(80)
+        } else course.record(exam.id, live, { accuracy: 1 })
+        const ex = stored().exams?.[COURSE.levels[0].id]
+        check('placement: the exam taken early passes as a placement and opens level 2', onExam && !beforePassed && !!ex && ex.passed === true && ex.placement === true, `onExam=${onExam} exam=${JSON.stringify(ex)}`)
+        if (screen === 'exercise') { const nb = document.querySelector('[data-ex="next"]'); nb && nb.click(); await sleep(60) }
+        showScreen('home'); course.view.name = 'map'; course.view.itemId = null; showScreen('course')
+        check('placement: level 2 is open on the map', !!document.querySelector('#cr-level-2.st-open'), document.querySelector('#cr-level-2')?.className)
+        // the exam page: a pass is shown, and a task keeps its best result
+        course.openOwner(exam.id)
+        check('exam page shows the passed result', pageHas('.cr-complete') && /Exam passed/.test(document.querySelector('#screen-course .cr-complete-t')?.textContent || ''))
+      }
+    } catch (e) { check('exercise run', false, e && e.message) }
+    if (exercise) { exercise.destroy(); exercise = null }
+    if (saved == null) localStorage.removeItem('lumi.course'); else localStorage.setItem('lumi.course', saved)
+    course.show()
+    showScreen('home'); hideResults()
+  }
+  // course robustness: excess echo input, held keys on exit, Stop in the rhythm demo, trailing rests,
+  // a one-hand run of a both-hands task, and a failed progress save
+  {
+    const check = (what, ok, got) => console.log('SELFTEST course ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const saved = localStorage.getItem('lumi.course')
+    const realSet = Storage.prototype.setItem
+    try {
+      const mk = () => {
+        const log = { pressed: new Set(), stops: 0, recs: [], scheduled: 0 }
+        const deps = {
+          now: () => performance.now(),
+          press: (p) => log.pressed.add(p), release: (p) => log.pressed.delete(p),
+          schedule() { log.scheduled++ }, click() {}, stopSound: () => { log.stops++ }, latencyMs: () => 0
+        }
+        const host = { title: 'Test', record: (r) => { log.recs.push(r); return { passed: false } }, next: () => ({ label: 'Next', primary: true, go() {} }), back() {} }
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+        return { log, deps, host, root }
+      }
+      const key = (type, code) => document.dispatchEvent(new KeyboardEvent(type, { code, key: code === 'Space' ? ' ' : 'a', bubbles: true, cancelable: true }))
+      const echoItem = { id: 'rt-echo', type: 'echo', title: 'Echo', passAt: { accuracy: 0.8 }, params: { tempo: 240, hand: 'right', rounds: 1, notes: [{ p: 60, beats: 1 }, { p: 62, beats: 1 }, { p: 64, beats: 1 }] } }
+      // 1. more keys after the phrase is complete: no TypeError, input closed at once
+      let m = mk(), ex = mountExercise(m.root, { item: echoItem, deps: m.deps, host: m.host }), threw = null
+      ex.run.skipListening()
+      try { for (const p of [60, 62, 64, 66, 67]) ex.input(p) } catch (e) { threw = e }
+      await sleep(300)
+      check('echo ignores keys after the phrase is complete', !threw && ex.run.state().played === 3, threw ? threw.message : 'played=' + ex.run.state().played)
+      ex.destroy()
+      // 2. leaving with a computer key held lets the note go
+      m = mk(); ex = mountExercise(m.root, { item: echoItem, deps: m.deps, host: m.host })
+      ex.run.skipListening()
+      key('keydown', 'KeyA')
+      const heldDown = m.log.pressed.size === 1
+      ex.destroy(); key('keyup', 'KeyA')
+      check('leaving an exercise with a key held releases its note', heldDown && m.log.pressed.size === 0, 'down=' + heldDown + ' left=' + m.log.pressed.size)
+      // a tap on a rhythm followed at once by leaving
+      const rItem = { id: 'rt-rhythm', type: 'rhythm', title: 'Rhythm', passAt: { accuracy: 0.8 }, params: { tempo: 240, timeSignature: '4/4', pattern: [1, 1, 1, -1] } }
+      m = mk(); ex = mountExercise(m.root, { item: rItem, deps: m.deps, host: m.host })
+      m.root.querySelector('[data-ex="go"]').click()
+      key('keydown', 'Space')
+      const tapDown = m.log.pressed.size === 1
+      ex.destroy()
+      await sleep(200)
+      check('leaving rhythm right after a tap leaves nothing sounding', tapDown && m.log.pressed.size === 0, 'down=' + tapDown + ' left=' + m.log.pressed.size)
+      // 3. Stop during the demo silences the scheduled audio
+      m = mk(); ex = mountExercise(m.root, { item: rItem, deps: m.deps, host: m.host })
+      m.root.querySelector('[data-ex="demo"]').click()
+      const before = m.log.stops
+      m.root.querySelector('[data-ex="stop"]').click()
+      check('Stop in the rhythm demo cancels the scheduled sound', m.log.stops > before && ex.run.state().phase === 'ready', 'stops ' + before + '->' + m.log.stops)
+      ex.destroy()
+      // 4. a trailing rest is judged: the run lasts the whole pattern, and a tap in it costs
+      m = mk(); ex = mountExercise(m.root, { item: rItem, deps: m.deps, host: m.host })
+      const plan = ex.run.plan()
+      m.root.querySelector('[data-ex="go"]').click()
+      const endMs = ex.run.state().endMs
+      for (let t = 0; t < 40 && ex.run.state().phase !== 'tap'; t++) await sleep(50)
+      const p0 = ex.run.state().p0
+      ex.input(72, p0); ex.input(72, p0 + 250); ex.input(72, p0 + 500)
+      ex.input(72, p0 + 800)                                  // in the final rest
+      ex.run.judgeNow()
+      const acc = m.log.recs[0] && m.log.recs[0].accuracy
+      check('a tap through a trailing rest lowers the score', endMs >= plan.totalMs && acc !== undefined && acc < 1 && acc > 0.5, 'endMs=' + endMs + ' total=' + plan.totalMs + ' acc=' + acc)
+      ex.destroy()
+      // 7. finishing an ear run cancels its pending callbacks: nothing sounds after the results appear
+      const earItem = { id: 'rt-ear', type: 'ear', title: 'Ear', passAt: { accuracy: 0.8 }, params: { kind: 'higher-lower', rounds: 1 } }
+      m = mk(); ex = mountExercise(m.root, { item: earItem, deps: m.deps, host: m.host })
+      ex.run.pick(ex.run.question().answer); ex.run.next()
+      const shownRes = !!m.root.querySelector('[data-ex="result"]'), schedAt = m.log.scheduled
+      await sleep(700)
+      check('nothing sounds after an ear exercise shows its results', shownRes && m.log.scheduled === schedAt && m.log.pressed.size === 0, 'scheduled ' + schedAt + '->' + m.log.scheduled)
+      ex.destroy()
+      // 8. stopSound also silences queued metronome clicks
+      initAudio()
+      const ctxA = audioContext()
+      if (ctxA) { click(true, ctxA.currentTime + 5); const queued = pendingClicks(); cancelClicks(); check('cancelClicks silences queued metronome clicks', queued >= 1 && pendingClicks() === 0, queued + '->' + pendingClicks()) }
+      // 5. a one-hand run of a both-hands task is not a course pass
+      const both = COURSE.levels.flatMap((L) => [...L.lessons.flatMap((l) => l.items.map((it) => ({ owner: l.id, it }))), ...(L.exam ? L.exam.items.map((it) => ({ owner: L.exam.id, it })) : [])]).find((x) => x.it.type === 'piece' && x.it.params.tracks)
+      if (!both) check('a one-hand run of a both-hands task records no pass', false, 'no both-hands piece')
+      else {
+        localStorage.setItem('lumi.course', serializeProgress(emptyProgress())); course.show()
+        showScreen('course'); course.openOwner(both.owner); course.startItem(both.owner, both.it.id); await sleep(500)
+        player.setHandFilter('right')
+        for (let t = 0; t < 1000 && $('results').classList.contains('hidden'); t++) {
+          if (player) {
+            if (!player.active) { player.setCountIn(0); player.setMode('PRACTISE'); player.play() }
+            player.tick()
+            if (player.waiting) for (const p of [...player.needPitches]) { handleMidiMessage([0x90, p, 100]); handleMidiMessage([0x80, p, 0]); await sleep(12) }
+          }
+          await sleep(30)
+        }
+        const shown = !$('results').classList.contains('hidden')
+        const stored = JSON.parse(localStorage.getItem('lumi.course') || '{}')
+        const rec = stored.lessons && stored.lessons[both.owner] && stored.lessons[both.owner][both.it.id]
+        check('a one-hand run of a both-hands task records no pass', shown && !rec && !!courseRun && courseRun.filtered === true && courseRun.passed === false, `shown=${shown} rec=${JSON.stringify(rec)} filtered=${courseRun && courseRun.filtered}`)
+        hideResults(); showScreen('home')
+      }
+      // 6. a full storage keeps the earned pass in memory and says so; the next save retries
+      localStorage.setItem('lumi.course', serializeProgress(emptyProgress())); course.show()
+      const l1 = COURSE.levels[0].lessons[0], game = l1.items.find((i) => i.type === 'notegame')
+      Storage.prototype.setItem = function (k, v) { if (k === 'lumi.course') throw new Error('QuotaExceededError'); return realSet.call(this, k, v) }
+      course.record(l1.id, game, { accuracy: 1 })
+      const toast = $('status').textContent
+      const theory = l1.items.find((i) => i.type === 'theory')
+      for (const it of l1.items) if (it !== theory) course.record(l1.id, it, { accuracy: 1 })
+      showScreen('course'); course.openOwner(l1.id); course.startItem(l1.id, theory.id)
+      ;[...document.querySelectorAll('#screen-course .cr-opt')].find((b) => Number(b.dataset.i) === theory.params.answer).click()
+      const toast2 = $('status').textContent
+      check('a success notice still carries the unsaved warning', /Lesson complete/.test(toast2) && /Progress could not be saved/.test(toast2), 'toast="' + toast2 + '"')
+      course.show(); course.refreshHome()
+      const kept = !!(course.progress.lessons[l1.id] && course.progress.lessons[l1.id][game.id]) && course.unsaved
+      Storage.prototype.setItem = realSet
+      course.show()
+      const stored2 = JSON.parse(localStorage.getItem('lumi.course') || '{}')
+      check('a failed progress save keeps the pass and retries', kept && /Progress could not be saved/.test(toast) && !course.unsaved && !!(stored2.lessons && stored2.lessons[l1.id]), `kept=${kept} toast="${toast}" unsaved=${course.unsaved}`)
+    } catch (e) { check('robustness run', false, e && e.message) }
+    Storage.prototype.setItem = realSet
+    if (exercise) { exercise.destroy(); exercise = null }
+    if (saved == null) localStorage.removeItem('lumi.course'); else localStorage.setItem('lumi.course', saved)
+    course.show()
+    showScreen('home'); hideResults()
+  }
+  // discovery, daily goal and the info dialogs
+  {
+    const check = (what, ok, got) => console.log('SELFTEST polish ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const savedDays = localStorage.getItem('lumi.days'), savedFilter = localStorage.getItem(FILTER_KEY)
+    const savedGoal = settings.goalMin, savedTerm = searchTerm, savedChip = searchChip
+    try {
+      showScreen('search'); searchChip = 'songs'; searchTerm = ''; $('search').value = ''
+      libFilter = { level: '', composer: '' }; renderLibrary()
+      const grid = () => $('libraryGrid').children.length
+      const label = () => $('libCount').textContent
+      const total = grid()
+      check('library count', total === allSongs().length && label() === total + ' songs', label())
+      const labels = [...$('levelChips').children].map((b) => b.textContent)
+      check('level chips are the real levels', labels[0] === 'All levels' && labels.includes('Virtuoso') && labels.includes('Intermediate') && labels.includes('Level 1'), labels.join(','))
+      setFilter({ level: 'Virtuoso' })
+      const nV = grid()
+      check('level filter', nV > 0 && nV < total && nV === allSongs().filter((i) => i.level === 'Virtuoso').length && label() === nV + ' songs', nV + ' of ' + total)
+      setFilter({ composer: 'Chopin' })
+      const nC = grid()
+      check('composer filter', nC > 0 && nC <= nV && $('composerBtn').textContent.includes('Chopin'), nC)
+      check('filter is remembered', JSON.stringify(store.get(FILTER_KEY)) === JSON.stringify({ level: 'Virtuoso', composer: 'Chopin' }))
+      setFilter({ level: 'Level 1' })
+      check('empty state offers Clear filters', grid() === 0 && !$('searchEmpty').classList.contains('hidden') && !$('searchEmptyClear').classList.contains('hidden') && label() === 'No songs', label())
+      $('searchEmpty').querySelector('[data-empty="clear"]').click()
+      check('clear filters', grid() === total && !libFilter.level && !libFilter.composer && $('clearFilters').classList.contains('hidden'), grid())
+      const long = [...allSongs()].filter((i) => i.heavy).length
+      check('long piece marker', document.querySelectorAll('#libraryGrid .long-tag').length === long && long > 0, long)
+      check('search chips kept', ['songs', 'lessons', 'games', 'fav'].every((c) => document.querySelector('#searchChips [data-chip="' + c + '"]')))
+      // goal ring
+      const g = goalProgress(300, 10), g2 = goalProgress(600, 10), g3 = goalProgress(59, 5)
+      check('goal ring maths', g.mins === 5 && g.frac === 0.5 && !g.done && g.left === 5 && g2.done && g2.frac === 1 && g3.mins === 0 && cleanGoal(7) === 10 && cleanGoal('20') === 20 && crossedGoal(599, 600, 10) && !crossedGoal(600, 601, 10) && !crossedGoal(0, 599, 10))
+      const days = store.get('lumi.days', {}); days[todayKey()] = 300; store.set('lumi.days', days)
+      settings.goalMin = 10
+      updateHome()
+      await sleep(250)
+      check('goal ring shows 5 of 10', $('goalNow').textContent === '5' && $('goalTotal').textContent === '10' && /^50(\.0)?,? 100$/.test($('goalArc').style.strokeDasharray) && !$('goalRing').classList.contains('done'), $('goalArc').style.strokeDasharray)
+      settings.goalMin = 5; updateGoal(); await sleep(50)
+      check('goal reached state', $('goalRing').classList.contains('done') && $('goalNote').textContent === 'Goal reached')
+      // shortcuts and About
+      showScreen('home')
+      $('search').dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }))
+      const typed = $('shortcutsDialog').open
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true, bubbles: true, cancelable: true }))
+      check('? opens the shortcuts', !typed && $('shortcutsDialog').open && $('shortcutsDialog').textContent.includes('Space') && $('shortcutsDialog').textContent.includes('Replay'), 'typed=' + typed)
+      $('shortcutsDialog').close()
+      $('openAbout').click()
+      check('About shows the version', $('aboutDialog').open && /^(v\d|development)/.test($('aboutVersion').textContent), $('aboutVersion').textContent)
+      $('aboutDialog').close()
+    } catch (e) { check('run', false, e && e.message) }
+    for (const d of document.querySelectorAll('dialog[open]')) d.close()
+    if (savedDays == null) localStorage.removeItem('lumi.days'); else localStorage.setItem('lumi.days', savedDays)
+    if (savedFilter == null) localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, savedFilter)
+    libFilter = { level: '', composer: '' }; settings.goalMin = savedGoal; searchTerm = savedTerm; searchChip = savedChip
+    showScreen('home')
+  }
+  // ---------- Support my device ----------
+  {
+    const check = (what, ok, got) => console.log('SELFTEST device support ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const nap = (ms) => new Promise((r) => setTimeout(r, ms))
+    try {
+      fakeSupportMidi = fakeMidiAccess()
+      $('openDeviceSupport').click()
+      for (let i = 0; i < 40 && !(deviceSupport.state().detected && !deviceSupport.state().busy); i++) await nap(100)
+      const ds = deviceSupport.state()
+      check('wizard opens from Settings', $('deviceDialog').open && !$('dsDetectBtn').disabled && $('dsPorts').children.length === 2, $('dsPorts').children.length)
+      check('identity reply read', ds.identity.length === 1 && ds.identity[0].manufacturerId === '00 21 10' && ds.identity[0].version === '2.1.0.3', ds.identity[0] && ds.identity[0].manufacturerId)
+      // the USB checklist: every non-hub device offered, the ones sharing a word with a MIDI port ticked, the rest not; the name is prefilled
+      {
+        const boxes = [...$('dsUsb').querySelectorAll('input[type="checkbox"]')]
+        check('usb checklist lists every device', boxes.length === 5 && $('dsUsb').textContent.includes('Tracking Camera') && /Only ticked devices go into the report/.test($('dsUsb').textContent), boxes.length)
+        check('usb checklist defaults', boxes.filter((b) => b.checked).length === 2 && boxes[0].checked && boxes[1].checked && !boxes[2].checked, boxes.map((b) => +b.checked).join(''))
+        check('device name is prefilled from the first port', $('dsName').value === 'Example Keyboard', $('dsName').value)
+        boxes[2].checked = true; boxes[2].onchange()
+        let rep = deviceSupport.preview()
+        check('ticked devices only in the report', rep.includes('USB devices: 3 of 5 shown') && rep.includes('Tracking Camera') && !rep.includes('USB Drive') && !rep.includes('Mousecorp'), rep.match(/USB devices: [^\n]*/)?.[0])
+        boxes[2].checked = false; boxes[2].onchange()
+        rep = deviceSupport.preview()
+        check('unticking removes it again', rep.includes('USB devices: 2 of 5 shown') && !rep.includes('Tracking Camera'))
+        check('usb selection reaches the report input', deviceSupport.usbForReport().shown === 5 && deviceSupport.usbForReport().devices.length === 2)
+      }
+      deviceSupport.go(1)
+      await deviceSupport.startCapture()
+      handleMidiMessage([0x90, 48, 70]); handleMidiMessage([0x80, 48, 0]); handleMidiMessage([0x90, 84, 110]); handleMidiMessage([0x80, 84, 0])
+      handleMidiMessage([0xb0, 64, 127]); handleMidiMessage([0xb0, 64, 0]); handleMidiMessage([0xd0, 55])
+      deviceSupport.stopCapture(true)
+      stopAll(); setSustain(false); held.clear(); letGoAt.clear()
+      const cap = deviceSupport.state().capture
+      // per input port: one input plays a note on each of four channels (one channel per note), another sends pressure and a controller only
+      await deviceSupport.startCapture()
+      for (let ch = 0; ch < 4; ch++) deviceSupport.feed([0x90 + ch, 60 + ch, 50], 'fake-in-1')
+      deviceSupport.feed([0xd0, 30], 'fake-in-2'); deviceSupport.feed([0xd0, 90], 'fake-in-2'); deviceSupport.feed([0xb0, 74, 12], 'fake-in-2')
+      deviceSupport.stopCapture(true)
+      {
+        const cap = deviceSupport.state().capture
+        const mine = cap && cap.ports['p:fake-in-1'], other = cap && cap.ports['p:fake-in-2']
+        check('per-port statistics', !!mine && !!other && mine.noteOn === 4 && other.noteOn === 0 && other.channelPressure.count === 2 && other.channelPressure.max === 90 && !!other.cc[74], mine && mine.noteOn)
+        check('per-port mpeLike flag', mpeLike(mine) === true && mpeLike(other) === false)
+        check('per-port block in the Test step', /Example Keyboard/.test($('dsCaptureResult').textContent) && /sounded together on separate channels/.test($('dsCaptureResult').textContent) && /pressure/.test($('dsCaptureResult').textContent), $('dsCaptureResult').textContent.slice(0, 120))
+      }
+      check('capture keeps statistics only', cap && cap.noteOn === 2 && cap.low === 48 && cap.high === 84 && cap.velocity.min === 70 && cap.velocity.max === 110 && !!cap.cc[64] && cap.channelPressure.count === 1 && !JSON.stringify(cap).includes('"notes"'), cap && cap.noteOn)
+      $('dsName').value = 'Example Maker Example Keyboard'
+      $('dsNote').value = 'Keys work, lights do not. /Users/someone/Desktop/song.mid'
+      deviceSupport.go(3)
+      const text = $('dsPreview').textContent
+      const json = /```json\n([\s\S]*?)\n```/.exec(text)
+      check('preview shows the exact report', text.startsWith('Keylight device report') && text.includes('schema: keylight-device-report/1') && text.includes('Excluded:') && /characters/.test($('dsSize').textContent) && text === deviceSupport.preview(), $('dsSize').textContent)
+      check('preview is valid and private', !!json && JSON.parse(json[1]).schema === 'keylight-device-report/1' && !text.includes('/Users/someone') && !/Desktop/.test(text), text.length)
+      deviceSupport.go(4)
+      await deviceSupport.copyReport()
+      check('copy report builds the text', $('dsSendState').textContent.length > 0 && $('dsCopy').textContent === 'Copy report', $('dsSendState').textContent)
+      // a close in the middle of opening a port, or a port that refuses, leaves no listener behind
+      for (const [label, opts] of [['closed while opening', { openDelay: 60 }], ['port refuses', { openFails: true }]]) {
+        fakeSupportMidi = fakeMidiAccess(opts)
+        const port = fakeSupportMidi.inputs.get('fake-in-1')
+        const started = deviceSupport.startCapture()
+        if (opts.openDelay) deviceSupport.stopCapture(false)
+        await started
+        const cap2 = deviceSupport.state().capturing
+        deviceSupport.stopCapture(false)
+        const looking = deviceSupport.detect()
+        if (opts.openDelay) deviceSupport.cancelDetect()
+        await looking
+        deviceSupport.cancelDetect()
+        await nap(150)
+        check('no listener left: capture ' + label, port.listenerCount() === 0 && !deviceSupport.state().capturing, port.listenerCount() + ',' + cap2)
+      }
+      fakeSupportMidi = null
+      // the lights check stops when the wizard closes: no more notes, no key left lit, the button is back
+      {
+        const sent = []
+        const port = { send: (m) => sent.push([...m]), open: async () => port }
+        const keepOut = midiOutput
+        midiOutput = port
+        try {
+          runMidiLightTest()
+          await nap(250)
+          const running = lightTestActive && $('testLights').disabled
+          $('deviceDialog').close()
+          const after = sent.length
+          await nap(800)
+          const lateOns = sent.slice(after).filter((m) => (m[0] & 0xf0) === 0x90 && m[2] > 0).length
+          const lit = new Map()
+          for (const m of sent) { const on = (m[0] & 0xf0) === 0x90 && m[2] > 0; lit.set(m[1], on) }
+          check('lights check stops when the wizard closes', running && !lightTestActive && lateOns === 0 && ![...lit.values()].some(Boolean) && !$('testLights').disabled, `running=${running} lateOns=${lateOns} sent=${sent.length}`)
+          // and when a song starts playing
+          runMidiLightTest()
+          await nap(100)
+          cancelLightTest()
+          const n2 = sent.length
+          await nap(400)
+          check('lights check stops when playback starts', !lightTestActive && sent.length === n2)
+        } finally { midiOutput = keepOut; cancelLightTest() }
+      }
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally {
+      deviceSupport.stopCapture(false)
+      fakeSupportMidi = null
+      for (const d of document.querySelectorAll('dialog[open]')) d.close()
+    }
+  }
+  // practice: the tab, the hub, a round that never touches the course, time counting, the metronome
+  {
+    const check = (what, ok, got) => console.log('SELFTEST practice ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const saved = { course: localStorage.getItem('lumi.course'), practice: localStorage.getItem(STATS_KEY), days: localStorage.getItem('lumi.days'), last: localStorage.getItem('lumi.streak.last'), count: localStorage.getItem('lumi.streak.count') }
+    const restore = (k, v) => { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v) }
+    const q = (sel) => document.querySelector(sel)
+    const startBtn = (id) => q(`#screen-practice [data-id="${id}"] [data-act="start"]`)
+    const stats = () => parseStats(localStorage.getItem(STATS_KEY))
+    const playEar = async (right) => {
+      for (let n = 0; n < 12 && exercise && exercise.type === 'ear' && !q('#screen-exercise .ex-result'); n++) {
+        const qn = exercise.run.question()
+        const id = right ? qn.answer : qn.options.find((o) => o.id !== qn.answer).id
+        ;[...document.querySelectorAll('#screen-exercise [data-ex="pick"]')].find((b) => b.dataset.id === id).click(); await sleep(10)
+        q('#screen-exercise [data-ex="nxt"]').click(); await sleep(10)
+      }
+    }
+    try {
+      localStorage.removeItem(STATS_KEY)
+      showScreen('home'); hideResults()
+      const tabs = [...document.querySelectorAll('#nav button')].map((b) => b.dataset.screen)
+      check('the nav bar has Practice and no Achievements', tabs.join() === 'home,course,practice,search,settings', tabs.join())
+      // Home: the Practice rail above Songs, defaults first, no Explore section
+      const rail = [...document.querySelectorAll('#practiceRailList .pr-chip')].map((b) => b.dataset.id)
+      const railEl = $('practiceRail'), songsEl = $('songRail').closest('.rail-section')
+      check('Home shows the Practice rail above Songs with the defaults', rail.join() === 'playground,ear,rhythm' && !!(railEl.compareDocumentPosition(songsEl) & Node.DOCUMENT_POSITION_FOLLOWING) && !q('.explore'), rail.join())
+      // Achievements: a button on Home, pushed, so Back returns to Home
+      q('.home-ach').click()
+      const onAch = screen === 'achievements'
+      nav.back()
+      check('Achievements opened from Home goes back to Home', onAch && screen === 'home', screen)
+      // the hub
+      q('#practiceRail [data-go="practice"]').click()
+      const cards = [...document.querySelectorAll('#screen-practice .pr-card')].map((c) => c.dataset.id)
+      check('the hub shows every activity and Practice is the current tab', screen === 'practice' && cards.join() === ACTIVITIES.map((a) => a.id).join() && !!q('#nav [data-screen="practice"].on') && nav.depth() === 1, cards.join())
+      const pickers = ACTIVITIES.filter((a) => a.kind === 'exercise').every((a) => !!q(`#screen-practice [data-id="${a.id}"] select`) && q(`#screen-practice [data-id="${a.id}"] .pr-best`).textContent.length > 0)
+      check('each exercise has a level picker and a best-result line', pickers)
+      // ear training: a perfect round, then Harder
+      const courseBefore = localStorage.getItem('lumi.course')
+      startBtn('ear').click(); await sleep(40)
+      check('starting ear training shows the exercise screen', screen === 'exercise' && !!exercise && exercise.type === 'ear' && !!practiceRun && !courseExerciseRun && !!q('#nav [data-screen="practice"].on'), screen)
+      await playEar(true)
+      const labels = [...document.querySelectorAll('#screen-exercise .ex-acts button')].map((b) => b.textContent)
+      check('after a good round the buttons are Again and Harder', !!q('#screen-exercise .ex-result') && labels.join() === 'Harder,Again', labels.join())
+      const st1 = stats().items.ear
+      check('the round is kept in lumi.practice and leaves lumi.course byte-identical', !!st1 && st1.plays === 1 && st1.best['1'] === 1 && st1.lastLevel === 1 && localStorage.getItem('lumi.course') === courseBefore, JSON.stringify(st1))
+      q('#screen-exercise [data-ex="next"]').click(); await sleep(40)
+      check('Harder starts the next level', screen === 'exercise' && practiceRun && practiceRun.level === 2 && exercise.item.params.kind === 'step-skip', practiceRun && practiceRun.level)
+      // leaving half way writes nothing; Back (header) returns to Practice
+      const beforeLeave = localStorage.getItem(STATS_KEY)
+      q('#screen-exercise [data-ex="back"]').click(); await sleep(30)
+      check('Back from a Practice exercise returns to Practice and writes nothing', screen === 'practice' && localStorage.getItem(STATS_KEY) === beforeLeave && localStorage.getItem('lumi.course') === courseBefore, screen)
+      const sel = q('#screen-practice [data-id="ear"] select')
+      check('the picker suggests the next level after a 90% round', sel.value === '2' && sel.selectedOptions[0].textContent.includes('suggested'), sel.value + ' ' + sel.selectedOptions[0].textContent)
+      // a poor round: Back to Practice and Again; Escape and the Android back button also return
+      sel.value = '1'; sel.dispatchEvent(new Event('change'))
+      check('the best result shows for the chosen level', q('#screen-practice [data-id="ear"] .pr-best').textContent.includes('100%'), q('#screen-practice [data-id="ear"] .pr-best').textContent)
+      startBtn('ear').click(); await sleep(40)
+      await playEar(false)
+      const labels2 = [...document.querySelectorAll('#screen-exercise .ex-acts button')].map((b) => b.textContent)
+      const st2 = stats().items.ear
+      check('a poor round offers Back to Practice and Again and keeps the best', labels2.join() === 'Back to Practice,Again' && st2.plays === 2 && st2.best['1'] === 1 && localStorage.getItem('lumi.course') === courseBefore, labels2.join() + ' ' + JSON.stringify(st2))
+      q('#screen-exercise [data-ex="next"]').click(); await sleep(30)
+      check('Back to Practice lands on the Practice tab', screen === 'practice' && nav.current().screen === 'practice')
+      startBtn('rhythm').click(); await sleep(40)
+      const rhythmOn = screen === 'exercise' && exercise.type === 'rhythm'
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      check('Escape from a Practice exercise returns to Practice', rhythmOn && screen === 'practice', screen)
+      startBtn('echo').click(); await sleep(40)
+      const echoOn = screen === 'exercise' && exercise.type === 'echo'
+      const handled = globalThis.__keylightBack()
+      check('Android back from a Practice exercise returns to Practice', echoOn && handled === true && screen === 'practice', screen)
+      startBtn('sight').click(); await sleep(40)
+      check('sight-reading starts from Practice too', screen === 'exercise' && exercise.type === 'sight' && !!q('#screen-exercise .sg-n'))
+      nav.back()
+      check('a Practice round never changes the course file', localStorage.getItem('lumi.course') === courseBefore)
+      // Home rail after use: recent first
+      showScreen('home')
+      const rail2 = [...document.querySelectorAll('#practiceRailList .pr-chip')].map((b) => b.dataset.id)
+      check('the Home rail puts the activity you finished first, then the defaults', rail2.join() === 'ear,playground,rhythm', rail2.join())
+      // screens launch through callbacks
+      showScreen('practice', { tab: true })
+      q('#screen-practice [data-id="games"] [data-act="start"]').click()
+      const gamesOn = screen === 'games'
+      nav.back()
+      q('#screen-practice [data-id="playground"] [data-act="start"]').click()
+      check('Games and Playground launch from Practice and Back returns', gamesOn && screen === 'play' && freeplay && stats().items.games.plays === 1, screen)
+      nav.back()
+      check('Back from the Playground returns to Practice', screen === 'practice', screen)
+      // time counts through one function, without double counting
+      const today = () => store.get('lumi.days', {})[todayKey()] || 0
+      startBtn('ear').click(); await sleep(30)
+      lastActAt = performance.now(); const t0 = today(); practiceTick(); const counted = today() - t0
+      lastActAt = performance.now() - 30000; practiceTick(); const idle = today() - t0 - counted
+      check('time in an exercise counts toward the day, an idle one does not', counted === 1 && idle === 0, `counted=${counted} idle=${idle}`)
+      nav.back()
+      // the metronome
+      const m = () => practiceUi.metronome()
+      const setBpm = (v) => { const i = q('#prTempo'); i.value = String(v); i.dispatchEvent(new Event('change')) }
+      q('#screen-practice .pr-start').click()
+      let pending = 0, lit = false
+      for (let i = 0; i < 70; i++) { await sleep(20); pending = Math.max(pending, pendingClicks()); lit = lit || !!q('#screen-practice .pr-dot.now') }
+      check('the metronome starts, schedules clicks and moves the beat indicator', practiceUi.metronomeRunning() && pending >= 1 && lit && m().beat >= 0, `pending=${pending} lit=${lit} beat=${m().beat}`)
+      const t1 = today(); practiceTick()
+      check('metronome time counts toward the daily goal', today() - t1 === 1)
+      setBpm(300); const clamped = m().bpm
+      setBpm(10); const floor = m().bpm
+      setBpm(120)
+      q('#screen-practice [data-n="3"]').click(); await sleep(60)
+      check('tempo is held to 40-220 and beats per bar can change while running', clamped === 220 && floor === 40 && m().bpm === 120 && m().beatsPerBar === 3 && document.querySelectorAll('#screen-practice .pr-dot').length === 3 && practiceUi.metronomeRunning(), `bpm=${m().bpm} bpb=${m().beatsPerBar}`)
+      q('#screen-practice .pr-tap').click(); await sleep(500); q('#screen-practice .pr-tap').click()
+      check('tap tempo sets the tempo', m().bpm >= 100 && m().bpm <= 130, 'bpm=' + m().bpm)
+      q('#screen-practice .pr-start').click()
+      check('the metronome stops on Stop and its clicks are cancelled', !practiceUi.metronomeRunning() && pendingClicks() === 0 && !q('#screen-practice .pr-dot.now') && q('#screen-practice .pr-start').textContent === 'Start', 'pending=' + pendingClicks())
+      q('#screen-practice .pr-start').click(); await sleep(150)
+      const was = practiceUi.metronomeRunning()
+      showScreen('settings')
+      check('the metronome stops when the screen is left', was && !practiceUi.metronomeRunning() && pendingClicks() === 0, `was=${was}`)
+      const t2 = today(); practiceTick()
+      check('and then counts nothing', today() === t2)
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally {
+      practiceUi.stopMetronome()
+      restore('lumi.course', saved.course); restore(STATS_KEY, saved.practice); restore('lumi.days', saved.days); restore('lumi.streak.last', saved.last); restore('lumi.streak.count', saved.count)
+      showScreen('home'); hideResults()
+    }
+  }
+  // jam: the screen, the input routing, a recorded loop, the layout, leaving and coming back
+  {
+    const check = (what, ok, got) => console.log('SELFTEST jam ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const q = (sel) => document.querySelector(sel)
+    const all = (sel) => [...document.querySelectorAll(sel)]
+    const savedJam = localStorage.getItem('lumi.jam')
+    const savedDays = localStorage.getItem('lumi.days')
+    const savedStats = localStorage.getItem(STATS_KEY)
+    const realClick = HTMLAnchorElement.prototype.click, realCreate = URL.createObjectURL
+    const waitFor = async (fn, ms = 6000) => { for (let t = 0; t < ms; t += 50) { if (fn()) return true; await sleep(50) } return false }
+    const clickLabel = (label) => { const b = q(`#screen-jam [aria-label="${label}"]`); if (b) b.click(); return !!b }
+    try {
+      localStorage.removeItem('lumi.jam')
+      showScreen('home'); hideResults(); showScreen('practice', { tab: true })
+      check('Practice shows a Jam card', !!q('#screen-practice [data-id="jam"] [data-act="start"]'))
+      q('#screen-practice [data-id="jam"] [data-act="start"]').click(); await sleep(150)
+      const ui = jamUi
+      check('opening it mounts the screen', screen === 'jam' && !!ui && !!q('#screen-jam .jam') && ui.state().trackCount === 4 && !!q('#screen-jam .jam-key'), `screen=${screen}`)
+      check('the starter beat is in place and the transport is stopped', !ui.state().playing && ui.state().session.tracks[0].slots[0].events.length > 8)
+      // tempo up so a bar passes quickly
+      const bpm = q('#screen-jam input[aria-label="Tempo in beats per minute"]'); bpm.value = '220'; bpm.dispatchEvent(new Event('change')); await sleep(30)
+      check('the tempo field sets the tempo', ui.state().session.bpm === 220, 'bpm=' + ui.state().session.bpm)
+      clickLabel('Play'); await sleep(900)
+      check('Play starts the clock and the starter beat schedules hits', ui.state().playing && ui.state().beat > 0.5 && ui.state().scheduled >= 4 && q('#screen-jam [aria-label="Stop"]'), `beat=${ui.state().beat.toFixed(2)} scheduled=${ui.state().scheduled}`)
+      // keyboard input while Jam shows reaches Jam, not the synth
+      const before = activeVoiceCount()
+      handleNoteOn(60, 90, 0)
+      const heldInJam = ui.state().heldNotes, plainVoices = activeVoiceCount()
+      handleNoteOff(60, 0, 80)
+      handleMidiMessage([0x90, 64, 100]); handleMidiMessage([0xE0, 0, 0x60]); handleMidiMessage([0xD0, 50]); handleMidiMessage([0xB0, 74, 40])
+      const heldAfterMsg = ui.state().heldNotes
+      handleMidiMessage([0x80, 64, 70])
+      check('a key reaches Jam and starts no normal synth voice', before === 0 && heldInJam === 1 && plainVoices === 0 && heldAfterMsg === 1 && ui.state().heldNotes === 0 && activeVoiceCount() === 0, `before=${before} held=${heldInJam} voices=${plainVoices} afterMsg=${heldAfterMsg}`)
+      // record a loop on the chords track
+      check('the chords track plays the keys', ui.state().session.prefs.track === 2)
+      clickLabel('Record Chords loop 1')
+      check('arming shows the slot as armed', ui.state().session.rec.phase === 'armed' && /armed/.test(q('#screen-jam [aria-label^="Chords loop 1"]').getAttribute('aria-label')), ui.state().session.rec.phase)
+      // the take opens a little ahead of the audio: play once the music has reached its first beat
+      const started = await waitFor(() => ui.state().session.rec.phase === 'recording' && ui.state().beat >= ui.state().session.rec.startBeat)
+      handleNoteOn(60, 100, 0); await sleep(120); handleNoteOff(60, 0, 64)
+      handleNoteOn(64, 100, 0); await sleep(120); handleNoteOff(64, 0, 64)
+      clickLabel('Stop recording Chords loop 1')
+      const saved = await waitFor(() => !!ui.state().session.tracks[2].slots[0])
+      const clip = ui.state().session.tracks[2].slots[0]
+      check('arming, playing notes and passing bar lines records a clip', started && saved && clip.events.length === 2 && clip.lengthBeats % 4 === 0, `started=${started} events=${clip && clip.events.length}`)
+      check('the take announces itself and the slot plays', /^Loop saved/.test(ui.state().session.announce.text) && ui.state().session.tracks[2].active[0] === 0, ui.state().session.announce.text)
+      // practice time counts while the transport runs
+      const day = () => store.get('lumi.days', {})[todayKey()] || 0
+      const d0 = day(); practiceTick()
+      check('Jam counts toward the daily goal while it plays', day() - d0 === 1)
+      // a drum step
+      const cell = q('#screen-jam [aria-label="Kick, step 2 of 16, off"]'); cell.click()
+      check('a drum step toggles on', !!q('#screen-jam [aria-label="Kick, step 2 of 16, on"]') && ui.state().session.tracks[0].slots[0].events.length > 8)
+      clickLabel('Stop'); await sleep(60)
+      check('Stop silences the tracks', !ui.state().playing && jamVoiceCount() === 0, `jam voices=${jamVoiceCount()}`)
+      // scale lock dims keys
+      const lockBox = all('#screen-jam .jam-check').find((l) => l.textContent === 'Scale lock').querySelector('input')
+      const dimsBefore = all('#screen-jam .jam-key.dim').length
+      lockBox.checked = true; lockBox.dispatchEvent(new Event('change')); await sleep(30)
+      const dims = all('#screen-jam .jam-key.dim').length
+      check('scale lock dims the keys outside the scale', dimsBefore === 0 && dims >= 8 && ui.state().session.prefs.scaleLock, `dim=${dims}`)
+      lockBox.checked = false; lockBox.dispatchEvent(new Event('change'))
+      // export
+      let blob = null
+      URL.createObjectURL = (b) => { blob = b; return 'blob:jam-test' }
+      HTMLAnchorElement.prototype.click = function () { /* no save dialog in the test */ }
+      clickLabel('Export the session as a MIDI file'); await sleep(50)
+      URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick
+      const head = blob ? new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()).slice(0, 4)) : ''
+      check('export produces a MIDI file', head === 'MThd', head)
+      // the layout: the window's width, then 360 px wide, then the touch targets and the nav bar
+      const el = $('screen-jam')
+      const tooSmall = () => all('#screen-jam .jam button, #screen-jam .jam select, #screen-jam .jam input:not([type="radio"]):not([type="checkbox"])')
+        .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.height < 43.5 || (r.width < 43.5 && !b.classList.contains('jam-key'))) })
+        .map((b) => (b.getAttribute('aria-label') || b.textContent || b.className).slice(0, 30) + ' ' + Math.round(b.getBoundingClientRect().width) + 'x' + Math.round(b.getBoundingClientRect().height))
+      const wide = el.scrollWidth <= el.clientWidth + 1
+      check('no sideways overflow at the window width', wide, `scroll=${el.scrollWidth} client=${el.clientWidth}`)
+      check('every control is at least 44 px', tooSmall().length === 0, tooSmall().slice(0, 6).join('; '))
+      const kbWide = q('#screen-jam .jam-key.black').getBoundingClientRect().width + 8
+      check('a black key has a 44 px touch area', kbWide >= 43.5, 'width+reach=' + Math.round(kbWide))
+      el.style.width = '360px'; el.style.maxWidth = '360px'; await sleep(60)
+      const narrow = el.scrollWidth <= el.clientWidth + 1
+      const wider = all('#screen-jam .jam-card').filter((c) => c.getBoundingClientRect().right > el.getBoundingClientRect().right + 1).length
+      check('no sideways overflow at 360 px wide', narrow && wider === 0, `scroll=${el.scrollWidth} client=${el.clientWidth} cardsOver=${wider}`)
+      el.style.width = ''; el.style.maxWidth = ''
+      el.scrollTop = el.scrollHeight; await sleep(60)
+      const cards = all('#screen-jam .jam-card'), navTop = $('nav').getBoundingClientRect().top
+      check('nothing sits under the nav bar once scrolled to the end', cards[cards.length - 1].getBoundingClientRect().bottom <= navTop + 1, `bottom=${Math.round(cards[cards.length - 1].getBoundingClientRect().bottom)} nav=${Math.round(navTop)}`)
+      el.scrollTop = 0
+      await sleep(650)
+      const stored = (() => { try { return JSON.parse(localStorage.getItem('lumi.jam')) } catch { return null } })()
+      check('the session is saved', !!stored && stored.v === 1 && stored.bpm === 220 && stored.tracks[2].slots[0] && stored.tracks[2].slots[0].events.length === 2)
+      // leaving: Back lands on Practice and nothing is left running
+      clickLabel('Play'); await sleep(250)
+      nav.back(); await sleep(80)
+      const gone = ui.state()
+      check('Back lands on Practice and the screen is destroyed', screen === 'practice' && jamUi === null && gone.alive === false && gone.trackCount === 0 && !gone.playing && $('screen-jam').children.length === 0, `screen=${screen} alive=${gone.alive} tracks=${gone.trackCount}`)
+      check('no Jam voice is left sounding', jamVoiceCount() === 0 && !jamLit.size, 'voices=' + jamVoiceCount())
+      const t2 = day(); practiceTick()
+      check('and it counts nothing', day() === t2)
+      // coming back restores the saved session; Escape and the screen's own Back both leave
+      q('#screen-practice [data-id="jam"] [data-act="start"]').click(); await sleep(150)
+      const again = jamUi
+      check('entering again restores the saved session', !!again && again !== ui && again.state().session.bpm === 220 && again.state().session.tracks[2].slots[0].events.length === 2)
+      q('#screen-jam [aria-label="Leave Jam"]').click(); await sleep(60)
+      check("the screen's own Back returns to Practice", screen === 'practice' && jamUi === null, screen)
+      q('#screen-practice [data-id="jam"] [data-act="start"]').click(); await sleep(100)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      check('Escape returns to Practice', screen === 'practice' && jamUi === null, screen)
+      q('#screen-practice [data-id="jam"] [data-act="start"]').click(); await sleep(100)
+      showScreen('settings')
+      check('switching tabs destroys it too', screen === 'settings' && jamUi === null && jamVoiceCount() === 0)
+      check('Reset progress keeps Jam sessions', !/^lumi\.(best|game|lesson|lessonwatched|lessonpractised|exercise|course|practice|days|streak|recent|guided\.(progress|weak|section))(\.|$)/.test('lumi.jam'))
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally {
+      URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick
+      if (jamUi) { const j = jamUi; jamUi = null; j.destroy() }
+      const restoreItem = (k, v) => { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v) }
+      restoreItem('lumi.jam', savedJam); restoreItem('lumi.days', savedDays); restoreItem(STATS_KEY, savedStats)
+      $('screen-jam').style.width = ''; $('screen-jam').style.maxWidth = ''
+      showScreen('home'); hideResults()
+    }
+  }
+  // navigation: Back returns to the previous page, not always Home
+  {
+    const check = (what, ok, got) => console.log('SELFTEST nav ' + what + ': ' + (ok ? 'ok' : 'FAIL') + (got !== undefined ? ' (' + got + ')' : ''))
+    const savedTerm = searchTerm, savedChip = searchChip
+    try {
+      showScreen('home'); hideResults()
+      showScreen('settings'); nav.back()
+      check('Home, Settings, back lands on Home', screen === 'home', screen)
+      showScreen('search'); searchChip = 'songs'; $('search').value = 'twin'; searchTerm = 'twin'
+      $('screen-search').scrollTop = 40
+      showScreen('settings'); nav.back()
+      check('Search, Settings, back lands on Search with its text', screen === 'search' && $('search').value === 'twin' && searchTerm === 'twin', screen + ' text=' + $('search').value)
+      showScreen('home'); showScreen('course'); showScreen('toolbox'); nav.back()
+      check('Course, Scales & chords, back lands on Course', screen === 'course', screen)
+      showScreen('home'); showScreen('course'); showScreen('games'); nav.back()
+      check('Course, Games, back lands on Course', screen === 'course', screen)
+      showScreen('home')
+      await openLibrary('twinkle.xml')
+      check('Home, song, the song is on screen', screen === 'play' && !!song, screen)
+      nav.back()
+      check('back from the song lands on Home', screen === 'home', screen)
+      const handled = nav.back()
+      check('a second back does not re-enter the song', screen === 'home' && handled === false, screen + ' handled=' + handled)
+      check('Android back on Home leaves the app', globalThis.__keylightBack() === false && screen === 'home')
+      showScreen('search'); showScreen('play', {}); check('the song stays out of the stack', nav.depth() <= 3, 'depth=' + nav.depth())
+      showScreen('home')
+      check('Home starts a fresh stack', nav.depth() === 1 && nav.current().screen === 'home', 'depth=' + nav.depth())
+      showScreen('settings', { tab: true })
+      check('a tab starts a fresh stack and back goes Home', nav.depth() === 1 && nav.back() && screen === 'home', screen)
+    } catch (e) { check('ran to the end', false, e && e.message) }
+    finally { searchTerm = savedTerm; searchChip = savedChip; $('search').value = savedTerm; showScreen('home'); hideResults() }
   }
   console.log('SELFTEST done')
   } catch (e) { console.log('SELFTEST FAIL ' + (e && e.message)) }

@@ -1,11 +1,19 @@
 // Web Audio: expressive MPE instrument engine, metronome click, backing player
 import { Voice, INSTRUMENTS, prepareInstrument } from './instruments.js'
+import { loadPiano, pianoStatus } from './sampler.js'
+import { createFx } from './jam/fx.js'
+import { playDrum } from './jam/drums.js'
 
 // Everything ends in one soft limiter, after the volume, so the output never clips:
 //   synthIn (keys, song notes, band, clicks: level x volume) -> limiter -> speakers
 //   backingGain -> master (recordings and backing tracks: volume) -> limiter
 let ctx = null
 let synthIn = null
+let keyIn = null              // Airwave affects instruments only, before the shared limiter
+let airGain = null
+let airTone = null
+let airPan = null
+let airExpression = { raise: 0, tilt: 0, grasp: 0 }
 let master = null
 let backingGain = null
 let hush = null               // silent sink for the warm-up notes
@@ -71,6 +79,12 @@ export function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: safeBuffer() ? 'interactive' : LOW_LATENCY })
   const out = buildOutputChain(ctx, volume)
   synthIn = out.input
+  keyIn = new GainNode(ctx)
+  airGain = new GainNode(ctx)
+  airTone = new BiquadFilterNode(ctx, { type: 'highshelf', frequency: 2000, gain: 0 })
+  airPan = new StereoPannerNode(ctx, { pan: 0 })
+  keyIn.connect(airGain).connect(airTone).connect(airPan).connect(synthIn)
+  setAirExpression(airExpression)
   master = out.recordings
   limiter = out.output
   limiter.connect(ctx.destination)
@@ -82,6 +96,23 @@ export function initAudio() {
   return ctx
 }
 export const audioContext = () => ctx
+// raise/grasp: 0..1, tilt: -1..1. null (disable/lost tracking) resets to unity.
+// Saved master volume and backing/click/band levels are never modified.
+export function setAirExpression(value = null) {
+  const bounded = (v, low, high) => Number.isFinite(v) ? Math.max(low, Math.min(high, v)) : 0
+  airExpression = {
+    raise: bounded(value?.raise, 0, 1),
+    tilt: bounded(value?.tilt, -1, 1),
+    grasp: bounded(value?.grasp, 0, 1)
+  }
+  if (!ctx) return
+  const t = ctx.currentTime
+  airGain.gain.setTargetAtTime((1 + 0.35 * airExpression.raise) * (1 - 0.45 * airExpression.grasp), t, 0.05)
+  airTone.gain.setTargetAtTime(4 * airExpression.raise - 8 * airExpression.grasp, t, 0.05)
+  airPan.pan.setTargetAtTime(0.65 * airExpression.tilt, t, 0.05)
+}
+export function loadSampledPiano() { return loadPiano(initAudio()) }
+export const sampledPianoStatus = () => pianoStatus(ctx)
 export function setVolume(v) {
   volume = Math.max(0, Math.min(1, v))
   if (!ctx) return
@@ -105,15 +136,19 @@ function warm(id) {
     for (const type of ['sine', 'square', 'triangle']) new OscillatorNode(ctx, { type })
   }
   prepareInstrument(ctx, id)
+  if (id === 'sampled-piano' && pianoStatus(ctx).state !== 'ready') return
   for (const pitch of [36, 60, 84]) new Voice(ctx, hush, pitch, 1, id, bendRangeSemis).release(0.02)
 }
 
 const vkey = (channel, pitch) => channel + ':' + pitch
 export function setInstrument(id) {
-  if (!INSTRUMENTS.some((i) => i.id === id)) return
+  if (!INSTRUMENTS.some((i) => i.id === id)) return false
+  // Never silently substitute a synthesised sound under a sampled-piano label.
+  if (id === 'sampled-piano' && pianoStatus(ctx).state !== 'ready') return false
   instrument = id
   stopAll()
   if (ctx) warm(id)
+  return true
 }
 export const currentInstrument = () => instrument
 export const instrumentList = () => INSTRUMENTS
@@ -138,7 +173,7 @@ export function noteOn(pitch, velocity = 100, channel = 0) {
     m.delete(oldK)
     oldE.voice.release(0.08)
   }
-  const v = new Voice(ctx, synthIn, pitch, velocity, instrument, bendRangeSemis)
+  const v = new Voice(ctx, keyIn, pitch, velocity, instrument, bendRangeSemis)
   voices.set(k, { voice: v, pitch, channel })
   notesStarted++
   return v
@@ -187,7 +222,7 @@ export const stopNote = noteOff
 const scheduled = new Set()
 export function scheduleNote(pitch, velocity, when, duration) {
   if (!ctx) return null
-  const v = new Voice(ctx, synthIn, pitch, velocity, instrument, bendRangeSemis, when)
+  const v = new Voice(ctx, keyIn, pitch, velocity, instrument, bendRangeSemis, when)
   // end slightly early so a repeat of the same pitch is clearly re-struck
   v.release(Math.min(0.3, v.shape.release), when + Math.max(0.04, duration - 0.015))
   const entry = { voice: v, end: when + duration + 0.3 }
@@ -226,6 +261,14 @@ export function click(accent = false, when = null) {
   const g = new GainNode(ctx, { gain: 0 })
   g.gain.setValueAtTime(CLICK_LEVEL, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
   o.connect(g).connect(synthIn); o.start(t); o.stop(t + 0.06)
+  clicks.add(o); o.onended = () => clicks.delete(o)
+}
+// Silence queued clicks (a count-in or a rhythm exercise stopped part way).
+const clicks = new Set()
+export const pendingClicks = () => clicks.size
+export function cancelClicks() {
+  for (const o of [...clicks]) { try { o.stop() } catch { /* already ended */ } try { o.disconnect() } catch { /* ok */ } }
+  clicks.clear()
 }
 
 // ---------- take recording ----------
@@ -494,4 +537,145 @@ export function playHat(accent = false, when = null) {
   g.gain.exponentialRampToValueAtTime(0.0001, t + (accent ? 0.09 : 0.05))
   src.connect(hp).connect(g).connect(synthIn)
   src.start(t); src.stop(t + 0.12)
+}
+
+// ---------- Jam tracks ----------
+// Looped layers of the Jam screen. Each track has its own instrument and gain, and all of
+// them draw from one pool of voices. They never touch the keys' own voices (`voices`,
+// `pedalled`) or the song's (`scheduled`), so the global instrument change and stopAll
+// leave them alone, and they skip the Airwave stage (keyIn):
+//   voice -> track gain -> synthIn;  track gain -> send gain -> effects -> synthIn
+const JAM_MAX_VOICES = 32
+// Four tracks together sit about where one hand of chords does on the normal path.
+const JAM_TRACK_TRIM = 0.5
+const jamVoices = new Set()   // { voice, track, replayed, released, done, seq }
+let jamSeq = 0
+let jamEffects = null
+
+export function jamFx() {
+  initAudio()
+  if (!jamEffects) jamEffects = createFx(ctx, synthIn)
+  return jamEffects
+}
+export const jamVoiceCount = () => jamVoices.size
+
+// lift 0..127 -> a factor on the instrument's own release: 2x for a slow lift, 1x at 64,
+// 0.35x for a fast one
+export function liftFactor(lift) {
+  const l = Math.max(0, Math.min(127, Number.isFinite(lift) ? lift : 64))
+  return l <= 64 ? 2 - l / 64 : 1 - (0.65 * (l - 64)) / 63
+}
+
+// Make room for one more: a released note still fading goes first, then the oldest
+// replayed note (started with a time), then the oldest live one.
+function jamStealOne() {
+  let pick = null
+  const rank = (e) => (e.released ? 0 : e.replayed ? 1 : 2)
+  for (const e of jamVoices) if (!pick || rank(e) < rank(pick)) pick = e
+  if (!pick) return
+  jamVoices.delete(pick)
+  pick.done = true
+  pick.released = true
+  // Voice.release marks even a future release dead immediately. Replace that
+  // scheduled fade so a stolen note stops now, including before its start time.
+  pick.voice.dead = false
+  pick.voice.release(0.04)
+}
+
+export function createTrack({ kind = 'notes', instrument: startInstrument = 'lead', level = 0.8, send = 0 } = {}) {
+  initAudio()
+  const effects = jamFx()
+  const drums = kind === 'drums'
+  const trim = drums ? 1 : JAM_TRACK_TRIM
+  const gain = new GainNode(ctx, { gain: level * trim })
+  const sendGain = new GainNode(ctx, { gain: send })
+  gain.connect(synthIn)
+  gain.connect(sendGain).connect(effects.input)
+  let current = startInstrument, lvl = level, muted = false, disposed = false
+  const mine = new Set()
+  // a short linear glide: a gain with nothing playing through it is not processed, and
+  // setTargetAtTime would then start late, on the first note after the change
+  const glide = (param, to) => {
+    const t = ctx.currentTime
+    param.cancelScheduledValues(t)
+    param.setValueAtTime(param.value, t)
+    param.linearRampToValueAtTime(to, t + 0.01)
+  }
+  const apply = () => glide(gain.gain, muted ? 0 : lvl * trim)
+  const common = {
+    setLevel(v) { lvl = Math.max(0, Math.min(1, v)); apply() },
+    setSend(v) { glide(sendGain.gain, Math.max(0, Math.min(1, v))) },
+    setMute(on) { muted = !!on; apply() }
+  }
+  const finish = (e) => { e.done = true; jamVoices.delete(e); mine.delete(e) }
+  const dispose = (silence) => () => {
+    silence()
+    if (disposed) return
+    disposed = true
+    for (const n of [gain, sendGain]) { try { n.disconnect() } catch (_e) {} }
+  }
+
+  if (drums) {
+    const hits = new Set()
+    const silence = () => { for (const h of hits) h.stop(); hits.clear() }
+    return {
+      ...common,
+      hit(index, { when = null, velocity = 100 } = {}) {
+        if (disposed) return null
+        const h = playDrum(ctx, gain, index, { when, velocity })
+        hits.add(h)
+        const first = h.sources && h.sources[0]
+        if (first) first.addEventListener('ended', () => hits.delete(h))
+        return h
+      },
+      silence,
+      dispose: dispose(silence)
+    }
+  }
+
+  const silence = () => {
+    for (const e of [...mine]) {
+      if (!e.done) {
+        e.released = true
+        e.voice.dead = false
+        e.voice.release(0.04)
+      }
+      finish(e)
+    }
+  }
+  const live = (h) => h && !h.done && !h.released
+  return {
+    ...common,
+    noteOn(pitch, velocity = 100, when = null) {
+      if (disposed) return null
+      while (jamVoices.size >= JAM_MAX_VOICES) jamStealOne()
+      let voice
+      try { voice = new Voice(ctx, gain, pitch, velocity, current, bendRangeSemis, when) } catch (_e) { return null }
+      const entry = { voice, track: this, replayed: when != null, released: false, done: false, seq: jamSeq++ }
+      jamVoices.add(entry)
+      mine.add(entry)
+      ;(voice.oscillators ? voice.oscillators[0] : voice.source).addEventListener('ended', () => finish(entry))
+      return entry
+    },
+    noteOff(h, { lift = 64, when = null } = {}) {
+      if (!live(h)) return
+      h.released = true
+      h.voice.release(h.voice.shape.release * liftFactor(lift), when)
+      // Keep the entry until its source ends, even though Voice.dead is already
+      // true: silence and stealing must still be able to shorten this release.
+    },
+    bend(h, semitones) { if (live(h)) h.voice.setBend(semitones) },
+    press(h, v) { if (live(h)) h.voice.setPressure(v) },
+    slide(h, v) { if (live(h)) h.voice.setSlide(v) },
+    setInstrument(id) {
+      if (!INSTRUMENTS.some((i) => i.id === id)) return false
+      if (id === 'sampled-piano' && pianoStatus(ctx).state !== 'ready') return false
+      current = id
+      prepareInstrument(ctx, id)
+      return true
+    },
+    instrument: () => current,
+    silence,
+    dispose: dispose(silence)
+  }
 }

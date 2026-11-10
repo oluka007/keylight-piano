@@ -29,6 +29,7 @@ export class Player {
     this.mode = 'PLAY'
     this.advancement = 'continuous'
     this.rate = 1
+    this.minRate = Infinity     // rates used in this attempt; paused setup does not count
     this.handFilter = 'both'
     this.loop = { a: null, b: null, on: false }
     this.endAt = null           // a lesson section ends here instead of at the song end
@@ -76,6 +77,7 @@ export class Player {
     this.finished = false
     this.sectionStart = 0
     this.score = null
+    this.minRate = Infinity
     this._reindex()
     this._emit()
   }
@@ -194,6 +196,7 @@ export class Player {
     this._groupIndex = this._firstGroupAtOrAfter(this.position)
     this.playing = true
     this.waiting = false
+    this.minRate = Math.min(this.minRate, this.rate)
     if (this.mode === 'WATCH') this.advancement = 'continuous'
     this.epoch++
     this._emit()
@@ -224,6 +227,7 @@ export class Player {
     this.finished = false
     this.playing = false
     this.score = null
+    this.minRate = Infinity
     this._reindex()
     this.epoch++
     if (countIn && this.countIn > 0) this.play()
@@ -235,6 +239,7 @@ export class Player {
     this.sectionStart = Math.max(0, from || 0)
     this.endAt = to != null && to > this.sectionStart ? to : null
     this.score = null
+    this.minRate = Infinity
     this._reindex()
     this.seek(this.sectionStart)
   }
@@ -288,6 +293,7 @@ export class Player {
     const pos = this.currentPosition()
     this.position = pos
     this.rate = r
+    if (this.clockRunning) this.minRate = Math.min(this.minRate, r)
     this._anchorAt = this.now()
     this._anchorPos = pos
     if (this._countInUntil > this._anchorAt) this._anchorAt = this._countInUntil

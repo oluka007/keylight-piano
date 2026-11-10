@@ -1,0 +1,73 @@
+/* Keylight guide. Loaded after style.css and reuses its colours and faces.
+   No JavaScript, no motion: a calm reading page. */
+
+/* ---------- page title ---------- */
+.guide-head { padding: 132px 0 34px; border-bottom: 1px solid var(--line); }
+.guide-head h1 { font-family: var(--serif); font-weight: 500; letter-spacing: -.02em; line-height: 1.04; font-size: clamp(2.4rem, 6vw, 3.8rem); }
+.guide-head p { margin-top: 16px; color: var(--dim); font-size: 1.05rem; max-width: 46rem; }
+
+/* ---------- two columns: contents, then the reading column ---------- */
+.guide-grid { width: min(1120px, 100% - 40px); margin-inline: auto; display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 46rem); justify-content: start; gap: clamp(28px, 5vw, 72px); align-items: start; padding: 44px 0 100px; }
+
+/* ---------- table of contents ---------- */
+.toc { position: sticky; top: 106px; }
+.toc-label { margin: 0 0 14px; font-size: .74rem; letter-spacing: .16em; text-transform: uppercase; color: var(--mint); }
+.toc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc-list a { display: block; padding: 7px 12px; border-radius: 10px; color: var(--dim); font-size: .95rem; line-height: 1.35; text-decoration: none; transition: color .2s, background .2s; }
+.toc-list a:hover { color: var(--ink); background: rgba(255, 255, 255, .05); }
+
+/* ---------- reading column ---------- */
+.guide-content { max-width: 46rem; font-size: 1.05rem; line-height: 1.7; }
+.guide-content section + section { margin-top: 3.4rem; }
+.guide-content h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(1.6rem, 2.6vw, 2.05rem); line-height: 1.15; letter-spacing: -.02em; margin: 0 0 .7em; scroll-margin-top: 112px; display: flex; flex-wrap: wrap; align-items: center; gap: .55em; }
+.guide-content h3 { font: 600 1.06rem/1.35 var(--sans); margin: 1.9em 0 .45em; scroll-margin-top: 112px; }
+.guide-content p { margin: 0 0 1.05em; color: var(--dim); }
+.guide-content ul { margin: 0 0 1.2em; padding-left: 1.2em; display: grid; gap: .5em; color: var(--dim); }
+.guide-content li { padding-left: .1em; }
+.guide-content li::marker { color: var(--mint); }
+.guide-content b { font-weight: 600; color: var(--ink); }
+.guide-content a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: rgba(124, 240, 198, .55); }
+.guide-content a:hover { color: var(--mint); }
+
+/* ---------- badges and note boxes ---------- */
+.badge { display: inline-block; padding: 3px 11px; border-radius: 999px; font: 600 .68rem/1.5 var(--sans); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.badge-exp { color: var(--mint); box-shadow: inset 0 0 0 1px rgba(124, 240, 198, .45); }
+.badge-beta { color: var(--peach); box-shadow: inset 0 0 0 1px rgba(255, 191, 148, .45); }
+.note { margin: 0 0 1.2em; padding: 14px 18px; border-radius: 14px; background: rgba(255, 255, 255, .04); box-shadow: inset 0 0 0 1px var(--line); color: var(--dim); font-size: .98rem; }
+
+/* ---------- narrow screens: contents as a wrapping row of pills ---------- */
+@media (max-width: 900px) {
+  .guide-grid { grid-template-columns: minmax(0, 1fr); gap: 26px; padding: 30px 0 80px; }
+  .toc { position: static; }
+  .toc-label { display: none; }
+  .toc-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .toc-list a { padding: 7px 14px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); font-size: .9rem; }
+  .guide-content h2 { scroll-margin-top: 96px; }
+}
+
+@media (max-width: 420px) {
+  .guide-head { padding-top: 116px; }
+  .guide-content h2 { scroll-margin-top: 88px; }
+}
+
+/* ---------- no motion here, but honour the preference ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .toc-list a { transition: none; }
+}
+
+/* ---------- print ---------- */
+@media print {
+  body { background: #fff; color: #000; }
+  .nav, .toc, .skip { display: none; }
+  .guide-head { padding: 0 0 20px; border-bottom: 1px solid #000; }
+  .guide-head h1, .guide-content h2, .guide-content h3 { color: #000; }
+  .guide-grid { display: block; width: auto; margin: 0; padding: 0; }
+  .guide-content, .guide-head p { max-width: none; color: #000; }
+  .guide-content p, .guide-content ul, .guide-content b { color: #000; }
+  .guide-content a { color: #000; text-decoration: underline; }
+  .guide-content h2, .guide-content h3 { scroll-margin-top: 0; }
+  .guide-content section { break-inside: avoid-page; }
+  .badge { color: #000; box-shadow: none; border: 1px solid #000; }
+  .note { background: none; color: #000; box-shadow: none; border: 1px solid #000; }
+  .foot { color: #000; border-top: 1px solid #000; }
+}

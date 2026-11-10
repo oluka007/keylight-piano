@@ -1,0 +1,49 @@
+.support-dialog {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  font: 15px/1.5 var(--font);
+}
+.support-dialog::backdrop { background: var(--scrim); }
+.support-dialog h2 { margin: 0 0 24px; font-size: 28px; line-height: 1.25; }
+.support-dialog p { margin: 0 0 16px; max-width: 68ch; }
+.support-dialog .support-secondary { color: var(--muted); font-size: 14px; }
+.support-dialog a { color: var(--accent-2); text-underline-offset: .2em; }
+.support-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 32px; }
+.support-actions .primary, .support-actions a { min-height: 44px; display: inline-flex; align-items: center; padding: 12px 16px; }
+.support-dialog form { margin: 0; }
+.support-dialog #supportStorage:empty { display: none; }
+.support-card p { color: var(--muted); line-height: 1.5; max-width: 65ch; }
+@media (max-width: 600px) {
+  .support-dialog { padding: 24px; font-size: 17px; }
+  .support-dialog .support-secondary { font-size: 15px; }
+  .support-actions { align-items: stretch; flex-direction: column; }
+  .support-actions button { width: 100%; justify-content: center; }
+}
+
+.support-reminder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.support-reminder.hidden { display: none; }
+.support-reminder p { margin: 0; flex: 1 1 280px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.support-reminder-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.support-reminder-acts button { min-height: 40px; }
+@media (max-width: 600px) {
+  .support-reminder-acts { width: 100%; flex-direction: column; }
+  .support-reminder-acts button { width: 100%; }
+}

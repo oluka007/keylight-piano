@@ -1,0 +1,13 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+
+/video/*
+  Cache-Control: public, max-age=86400
+/img/*
+  Cache-Control: public, max-age=86400
+
+https://*.workers.dev/*
+  X-Robots-Tag: noindex

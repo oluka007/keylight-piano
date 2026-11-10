@@ -1,0 +1,71 @@
+/* Guided practice (guided.js): a modal dialog over the player, built from the style.css
+   tokens. The header stays put and the body scrolls; one primary action. */
+.guided-btn { height: 36px; padding: 0 16px; font-size: 14px; flex: none; border-color: var(--chrome-line); color: var(--chrome-text); }
+.guided-btn:hover { background: var(--chrome-hover); border-color: var(--outline); }
+
+.guided {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px;
+  background: var(--scrim);
+  animation: fadeIn var(--dur) var(--ease-out) both;
+}
+.guided-panel {
+  width: min(760px, 100%); max-height: 100%; display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-xl);
+  box-shadow: var(--lift);
+}
+.guided-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px 12px; flex: none; }
+.guided-titles { min-width: 0; }
+.guided-kicker { color: var(--accent-2); letter-spacing: .16em; font-size: 12.5px; font-weight: 600; }
+.guided-title { margin: 4px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.guided-close { height: 44px; padding: 0 8px; flex: none; }
+
+.guided-body { overflow-y: auto; overscroll-behavior: contain; padding: 4px 24px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.guided-body::-webkit-scrollbar { width: 10px; }
+.guided-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+.guided-lead { margin: 0; font-size: 17px; line-height: 1.4; max-width: 65ch; }
+.guided-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 65ch; }
+.guided-primary { min-width: 180px; }
+.guided-primary:disabled { background: var(--surface-3); color: var(--muted); box-shadow: none; cursor: default; }
+
+.guided-verdict { width: 100%; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.guided-verdict-head { margin: 0; font-size: 18px; font-weight: 600; }
+.guided-verdict-text { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+
+.guided-prefs { display: flex; flex-wrap: wrap; gap: 12px 16px; width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
+.guided-pref { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.guided-pref select {
+  height: 44px; min-width: 150px; padding: 0 36px 0 14px; border-radius: 999px; appearance: none;
+  border: 1px solid var(--line-strong); background: var(--list) var(--chevron) no-repeat right 12px center / 16px;
+  color: var(--text); font-size: 14px; cursor: pointer;
+}
+.guided-pref select:hover { border-color: var(--outline); }
+
+.guided-lists { display: grid; grid-template-columns: 1fr; gap: 20px; width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
+.guided-sub { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+.guided-phrases, .guided-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.guided-phrase {
+  width: 100%; min-height: 44px; padding: 8px 14px; border-radius: var(--radius-sm); background: var(--list);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left;
+  transition: background-color var(--dur);
+}
+.guided-phrase:hover:not(:disabled) { background: var(--surface); }
+.guided-phrase[aria-current] { background: var(--surface-2); }
+.guided-phrase[aria-current] .guided-phrase-name { color: var(--accent-2); }
+.guided-phrase:disabled { cursor: default; color: var(--faint); }
+.guided-phrase-name { font-weight: 500; }
+.guided-phrase-status, .guided-step-state { color: var(--muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.guided-step { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 6px 14px; border-radius: var(--radius-sm); }
+.guided-step.is-next { background: var(--accent-soft); }
+.guided-step.is-next .guided-step-state { color: var(--text); }
+.guided-step.is-later .guided-step-name { color: var(--muted); }
+
+@media (min-width: 760px) {
+  .guided-lists { grid-template-columns: 1.2fr 1fr; }
+}
+@media (max-width: 480px) {
+  .guided { padding: 8px; }
+  .guided-head { padding: 16px 16px 8px; }
+  .guided-body { padding: 4px 16px 16px; }
+  .guided-primary { width: 100%; }
+  .guided-pref, .guided-pref select { width: 100%; }
+}

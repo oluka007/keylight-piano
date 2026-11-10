@@ -1,0 +1,31 @@
+# DRAFT, never run yet: builds an UNSIGNED .ipa for AltStore / SideStore users (they sign it with their own Apple ID).
+# Manual trigger only.
+name: iOS unsigned ipa
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Tools
+        run: brew install xcodegen
+      - name: Build unsigned archive
+        run: |
+          export KEYLIGHT_VERSION="$(node -p 'require("./package.json").version')" KEYLIGHT_BUILD="${GITHUB_RUN_NUMBER}"
+          cd ios
+          xcodegen generate
+          xcodebuild archive -project Keylight.xcodeproj -scheme Keylight -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Keylight.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+      - name: Make the ipa
+        run: |
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$RUNNER_TEMP/Keylight.xcarchive/Products/Applications/Keylight.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/Keylight-unsigned.ipa" Payload)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Keylight-unsigned-ipa
+          path: Keylight-unsigned.ipa

@@ -1,0 +1,72 @@
+/* Practice tab and the Home Practice rail. Uses the tokens from glass.css (linked last, so this file is
+   linked after it). Works from 360 px wide: one column, 44 px touch targets, no horizontal scroll. */
+
+.pr-page { max-width: 1080px; margin: 0 auto; padding-bottom: 24px; }
+.pr-lead { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 20px; max-width: 62ch; }
+.pr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 16px; }
+.pr-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px 18px 16px; border-radius: 24px;
+  background: var(--glass-fill); border: 1px solid var(--pane-line); box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+.pr-wide { grid-column: 1 / -1; }
+.pr-title { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -.01em; color: var(--text); }
+.pr-blurb { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.pr-pick, .pr-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pr-lab { color: var(--muted); font-size: 13px; }
+.pr-best { margin: 0; color: var(--faint); font-size: 13px; min-height: 1.3em; }
+.pr-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+.pr-acts button, .pr-tap { min-height: 44px; }
+.pr-card .pr-acts .primary, .pr-card .pr-acts .ghost { padding-left: 22px; padding-right: 22px; }
+
+.pr-select, .pr-num {
+  min-height: 44px; padding: 0 12px; border-radius: 14px; font: inherit; font-size: 15px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+}
+.pr-select { min-width: 0; max-width: 100%; }
+.pr-num { width: 5.5em; }
+.pr-select:focus-visible, .pr-num:focus-visible, .pr-seg:focus-visible, .pr-slider:focus-visible, .pr-check input:focus-visible,
+.pr-chip:focus-visible, .pr-card button:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+/* metronome */
+.pr-metro { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.pr-slider { width: 100%; min-height: 32px; accent-color: var(--mint); }
+.pr-segs { display: inline-flex; gap: 6px; }
+.pr-seg {
+  min-width: 44px; min-height: 44px; border-radius: 14px; font: inherit; font-size: 15px; font-weight: 600; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--line-strong); cursor: pointer;
+}
+.pr-seg[aria-pressed="true"] { color: var(--ink); background: var(--mint); border-color: var(--mint); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pr-seg[aria-pressed="true"]::before { content: "\2713\00a0"; }
+.pr-check { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text); font-size: 14px; cursor: pointer; }
+.pr-check input { width: 22px; height: 22px; accent-color: var(--mint); }
+.pr-beatrow { gap: 16px; min-height: 40px; }
+.pr-dots { display: inline-flex; gap: 10px; align-items: center; }
+.pr-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); background: transparent; transition: transform .08s linear, background-color .08s linear; }
+.pr-dot.first { border-radius: 5px; border-color: var(--outline); }            /* beat one is a square, so it differs by shape too */
+.pr-dot.now { background: var(--mint); border-color: var(--mint); transform: scale(1.35); box-shadow: 0 0 12px var(--glow); }
+.pr-beattext { color: var(--muted); font-size: 14px; min-width: 7em; }
+.pr-metro.running .pr-beattext { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .pr-dot { transition: none; } }
+
+/* Home rail */
+.pr-rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 14px; }
+.pr-chip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; min-height: 96px; padding: 16px 18px; border-radius: 22px;
+  background: var(--glass-fill); border: 1px solid var(--pane-line); box-shadow: var(--glass-edge); color: var(--text); cursor: pointer;
+  transition: border-color .2s, transform .2s var(--ease-out);
+}
+.pr-chip:hover { border-color: var(--outline); transform: translateY(-2px); }
+.pr-chip:active { transform: scale(.98); }
+.pr-chip b { font-family: var(--serif); font-weight: 500; font-size: 19px; letter-spacing: -.01em; }
+.pr-chip span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+
+/* the Achievements button next to the goal ring on Home */
+.home-ach { cursor: pointer; color: var(--text); height: 56px; padding: 0 18px; }
+.home-ach:hover { border-color: var(--outline); }
+.home-ach:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .pr-card { padding: 16px 14px 14px; border-radius: 20px; }
+  .pr-rail { grid-template-columns: 1fr; }
+  .pr-chip { min-height: 0; }
+}
