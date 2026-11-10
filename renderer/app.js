@@ -6755,6 +6755,7 @@ async function runSelfTest() {
       check('Sheet only is in the view menu', !!item && item.getAttribute('aria-disabled') === 'false')
       item.click()
       await drawn(song.score)
+      for (let i = 0; i < 40 && $('sheetStrip').offsetHeight <= 200; i++) await sleep(50)   // layout can lag the drawing on a slow machine
       check('Sheet only hides the falling notes and fills the stage', settings.view === 'SHEET' && $('screen-play').classList.contains('sheet-only') && !$('sheetStrip').classList.contains('hidden') && $('sheetStrip').offsetHeight > 200 && getComputedStyle(canvas.parentElement).display === 'none', $('sheetStrip').offsetHeight)
       check('Sheet only keeps the player controls and the Sheet button is locked on', $('btnPlay').offsetParent !== null && $('btnSheet').disabled)
       const row = sheet.timeline.find((r) => r.notes && r.notes.length)
