@@ -88,7 +88,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'keylight-test-win-'))
     assert.throws(() => flipFusesInBuffer(Buffer.concat([wire('1111'), wire('1111')])), /more than one/); n++
     assert.throws(() => flipFusesInBuffer(Buffer.from('no wire here')), /not found/); n++
 
-    // ---- README.txt is the README's Windows install section, with the version filled in
+    // ---- README.txt is the Windows install section of docs/REFERENCE.md, with the version filled in
     const txt = windowsInstallText('9.8.7')
     assert.match(txt, /^Keylight 9\.8\.7 for Windows \(x64\)\r\n/); n++
     assert.match(txt, /Keylight-9\.8\.7-win-x64\.zip/); n++
@@ -100,8 +100,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'keylight-test-win-'))
     assert.match(txt, /Releases page: https:\/\/github\.com\/scizerss\/keylight-piano\/releases/); n++
     assert.equal(plainText('Click **More info**, see [the issues](https://x.y/z) or [below](#here), run `a.exe`.'),
       'Click More info, see the issues: https://x.y/z or below, run a.exe.'); n++
-    // the same text from a CRLF checkout of README.md
-    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').replace(/\r?\n/g, '\r\n')
+    // the same text from a CRLF checkout of docs/REFERENCE.md
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'docs', 'REFERENCE.md'), 'utf8').replace(/\r?\n/g, '\r\n')
     assert.equal(windowsInstallText('9.8.7', readme), txt); n++
 
     // ---- the icon: 32-bit bitmaps (height doubled for the AND mask) up to 64 px, PNG above

@@ -337,11 +337,11 @@ function plainText(md) {
     .replace(/`([^`]+)`/g, '$1')
 }
 
-// The README's "## Install on Windows" section, for README.txt (plain text, Windows line ends)
-function windowsInstallText(version, readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')) {
+// The "## Install on Windows" section of docs/REFERENCE.md, for README.txt (plain text, Windows line ends)
+function windowsInstallText(version, readme = fs.readFileSync(path.join(ROOT, 'docs', 'REFERENCE.md'), 'utf8')) {
   readme = readme.replace(/\r\n/g, '\n')   // in case a checkout has CRLF
   const m = readme.match(/^## Install on Windows\n([\s\S]*?)(?=^## |(?![\s\S]))/m)
-  if (!m) throw new Error('README.md has no "## Install on Windows" section')
+  if (!m) throw new Error('docs/REFERENCE.md has no "## Install on Windows" section')
   const body = plainText(m[1].trim().replaceAll('<version>', version))
   return (`${NAME} ${version} for Windows (x64)\n\n${body}\n\nhttps://github.com/scizerss/keylight-piano\n`).replace(/\r?\n/g, '\r\n')
 }

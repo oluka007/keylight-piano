@@ -123,9 +123,9 @@ fi
 if ! out=$(codesign --force --deep -s - "$NEW" 2>&1); then print -r -- "$out" >&2; exit 1; fi
 codesign --verify --deep --strict "$NEW"
 
-# Release zip: Keylight-<version>/ with Keylight.app and the install steps from the README.
-INSTALL=$(awk '/^## Install$/ { on = 1; next } on && /^## / { exit } on' "$ROOT/README.md")
-[[ -n $INSTALL ]] || INSTALL=$(<"$ROOT/README.md")
+# Release zip: Keylight-<version>/ with Keylight.app and the install steps from docs/REFERENCE.md.
+INSTALL=$(awk '/^## Install$/ { on = 1; next } on && /^## / { exit } on' "$ROOT/docs/REFERENCE.md")
+[[ -n $INSTALL ]] || INSTALL=$(<"$ROOT/docs/REFERENCE.md")
 print -r -- "$NAME $VERSION"$'\n\n'"${INSTALL//"<version>"/$VERSION}" > "$PKG/README.txt"
 DIST="$ROOT/dist"
 ZIP="$DIST/$NAME-$VERSION-mac.zip"
