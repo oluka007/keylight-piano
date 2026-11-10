@@ -2,5 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "keylight",
   "compatibility_date": "2026-11-10",
-  "assets": { "directory": "./site-next" }
+  "assets": { "directory": "./site-next" },
+  "routes": [
+    { "pattern": "keylightpiano.app", "custom_domain": true },
+    { "pattern": "www.keylightpiano.app", "custom_domain": true }
+  ]
 }
